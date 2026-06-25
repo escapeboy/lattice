@@ -1,40 +1,27 @@
 /**
- * @lattice/runtime — Concurrency runtime + scheduler (S0 scaffold; implementation in S4)
+ * @lattice/runtime — Concurrency runtime + scheduler.
  */
 
-import type { BrowserContextId } from "@lattice/engine";
+export type {
+  BrowserContextId,
+  ContextHandle,
+  ContextSlot,
+  FanOutResult,
+  ResourceBudget,
+  RuntimeScheduler,
+  SessionTopology,
+  SnapshotData,
+} from "./types.js";
 
-export type SessionTopology = "ephemeral" | "persistent" | "pooled";
+export { RuntimeSchedulerImpl } from "./scheduler.js";
 
-export interface ResourceBudget {
-  maxContexts: number;
-  maxMemoryMb: number;
-  maxCpuPercent: number;
-}
+import type { EngineAdapter } from "@lattice/engine";
+import { RuntimeSchedulerImpl } from "./scheduler.js";
+import type { ResourceBudget, RuntimeScheduler } from "./types.js";
 
-export interface SessionContext {
-  readonly id: BrowserContextId;
-  readonly topology: SessionTopology;
-}
-
-export interface FanOutResult<T> {
-  readonly contextId: BrowserContextId;
-  readonly result: T;
-}
-
-export interface RuntimeScheduler {
-  createContext(topology: SessionTopology): Promise<SessionContext>;
-  destroyContext(id: BrowserContextId): Promise<void>;
-  fanOut<T>(
-    count: number,
-    task: (ctx: SessionContext) => Promise<T>,
-  ): Promise<ReadonlyArray<FanOutResult<T>>>;
-  snapshot(id: BrowserContextId): Promise<Uint8Array>;
-  restore(snapshot: Uint8Array): Promise<SessionContext>;
-  activeCount(): number;
-}
-
-export function createRuntimeScheduler(_budget: ResourceBudget): RuntimeScheduler {
-  void _budget;
-  throw new Error("Not implemented — see S4");
+export function createRuntimeScheduler(
+  engine: EngineAdapter,
+  budget: ResourceBudget,
+): RuntimeScheduler {
+  return new RuntimeSchedulerImpl(engine, budget);
 }
