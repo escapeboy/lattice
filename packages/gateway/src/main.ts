@@ -12,11 +12,13 @@
  *   LATTICE_EGRESS_ALLOWLIST comma-separated egress origin allowlist
  *   LATTICE_PROHIBITED      comma-separated always-prohibited action types
  *   LATTICE_TRANSPORT       "http" (default) or "stdio"
+ *   LATTICE_NTFY_BASE       ntfy server base URL for handoff push (optional)
+ *   LATTICE_HANDOFF_KEY     HMAC key for signing input handoffs (optional)
  */
 
 import { createEngineAdapter, detectChromiumExecutable } from "@lattice/engine";
 import { SecurityKernelImpl } from "@lattice/kernel";
-import { createAgentGateway } from "./index.js";
+import { createAgentGateway, NtfyTransport } from "./index.js";
 
 function list(env: string | undefined): string[] {
   return (env ?? "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -43,7 +45,14 @@ async function main(): Promise<void> {
     prohibitedActions: list(process.env["LATTICE_PROHIBITED"]),
   });
 
-  const gateway = createAgentGateway({ engine, kernel });
+  const ntfyBase = process.env["LATTICE_NTFY_BASE"];
+  const handoffKey = process.env["LATTICE_HANDOFF_KEY"];
+  const gateway = createAgentGateway({
+    engine,
+    kernel,
+    ...(ntfyBase ? { handoffTransport: new NtfyTransport(ntfyBase) } : {}),
+    ...(handoffKey ? { handoffSigningKey: handoffKey } : {}),
+  });
 
   const shutdown = () => {
     void (async () => {

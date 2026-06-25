@@ -8,6 +8,7 @@
 export { ControlPlaneServer } from "./server.js";
 export { ApprovalInbox } from "./inbox.js";
 export { PolicyEditor } from "./policy.js";
+export { OperatorGrantInbox } from "./operator-grants.js";
 export { buildUI } from "./ui.js";
 export type {
   ApprovalDecision,
@@ -16,3 +17,4 @@ export type {
   PolicyConfig,
   SessionView,
 } from "./types.js";
+export type { OperatorGrantOutcome, OperatorGrantRequest } from "./operator-grants.js";
