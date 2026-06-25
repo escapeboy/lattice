@@ -38,16 +38,15 @@ interface GetBoxModelResult {
   };
 }
 
-interface GetDocumentResult {
-  root: { nodeId: number };
-}
-
-interface GetAttributesResult {
-  attributes: string[];
-}
-
-interface PushNodesResult {
-  nodeIds: number[];
+interface DomSnapshotResult {
+  documents: Array<{
+    nodes: {
+      backendNodeId: number[];
+      attributes: number[][];
+      isClickable?: { index: number[] };
+    };
+  }>;
+  strings: string[];
 }
 
 // ── Role mapping ──────────────────────────────────────────────────────────────
@@ -153,25 +152,52 @@ async function fetchGeometry(cdp: CDPHandle, backendNodeId: number): Promise<Nod
   }
 }
 
-async function fetchHref(cdp: CDPHandle, backendNodeId: number): Promise<string | undefined> {
+// ── DOM enrichment (one snapshot for the whole page) ─────────────────────────
+
+interface DomEnrichment {
+  /** Chrome's own click-target heuristic (handler / role / pointer). */
+  readonly clickable: boolean;
+  /** Has tabindex >= 0 — keyboard-focusable even without a semantic role. */
+  readonly focusable: boolean;
+  readonly href?: string;
+}
+
+/**
+ * One DOMSnapshot.captureSnapshot for the whole page, keyed by backendNodeId.
+ * Replaces the old per-link 3-call href dance (DOM.getDocument +
+ * pushNodesByBackendIdsToFrontend + getAttributes × N links) with a single
+ * round-trip, and supplies the clickability signal that lets us recover
+ * role-less but interactive elements (div-soup UIs) the AX tree leaves generic.
+ */
+async function captureDomEnrichment(cdp: CDPHandle): Promise<Map<number, DomEnrichment>> {
+  const map = new Map<number, DomEnrichment>();
   try {
-    // DOM.getDocument must be requested once so the backend→frontend node map exists.
-    await cdp.send<GetDocumentResult>("DOM.getDocument", { depth: 0 });
-    // pushNodesByBackendIdsToFrontend returns `nodeIds` (plural array), not `nodeId`.
-    const { nodeIds } = await cdp
-      .send<PushNodesResult>("DOM.pushNodesByBackendIdsToFrontend", { backendNodeIds: [backendNodeId] })
-      .catch(() => ({ nodeIds: [] as number[] }));
-    const frontendId = nodeIds[0];
-    if (!frontendId) return undefined;
-    const { attributes } = await cdp.send<GetAttributesResult>("DOM.getAttributes", { nodeId: frontendId });
-    // attributes is a flat [name, value, name, value, …] list — scan name slots only.
-    for (let i = 0; i < attributes.length; i += 2) {
-      if (attributes[i] === "href") return attributes[i + 1];
+    const snap = await cdp.send<DomSnapshotResult>("DOMSnapshot.captureSnapshot", { computedStyles: [] });
+    const doc = snap.documents[0];
+    if (!doc) return map;
+    const { strings } = snap;
+    const clickable = new Set(doc.nodes.isClickable?.index ?? []);
+    const beIds = doc.nodes.backendNodeId;
+    const attrsArr = doc.nodes.attributes;
+
+    for (let i = 0; i < beIds.length; i++) {
+      const beId = beIds[i];
+      if (beId === undefined || beId < 0) continue;
+      const attrs = attrsArr[i] ?? [];
+      let href: string | undefined;
+      let focusable = false;
+      for (let a = 0; a + 1 < attrs.length; a += 2) {
+        const name = strings[attrs[a]!];
+        const val = strings[attrs[a + 1]!];
+        if (name === "href") href = val;
+        else if (name === "tabindex" && val !== undefined && Number(val) >= 0) focusable = true;
+      }
+      map.set(beId, { clickable: clickable.has(i), focusable, ...(href !== undefined ? { href } : {}) });
     }
-    return undefined;
   } catch {
-    return undefined;
+    // DOMSnapshot unavailable — degrade to a11y-only (no href / clickability).
   }
+  return map;
 }
 
 // ── Main IG builder ──────────────────────────────────────────────────────────
@@ -187,6 +213,9 @@ export async function buildInteractionGraph(
     { depth: -1 },
   );
 
+  // One DOM snapshot for href + clickability, keyed by backendNodeId.
+  const domEnrich = await captureDomEnrichment(cdp);
+
   // Build parent lookup
   const byId = new Map<string, AXNode>();
   for (const n of axNodes) byId.set(n.nodeId, n);
@@ -200,6 +229,26 @@ export async function buildInteractionGraph(
     return parentRole ? [...parentRoles, parentRole] : parentRoles;
   }
 
+  // Derive a label from descendant text for role-less nodes whose own AX name is
+  // empty (div-soup: the text lives in child StaticText/InlineTextBox nodes).
+  function descendantText(node: AXNode, depth = 3): string {
+    if (depth === 0) return "";
+    const parts: string[] = [];
+    for (const cid of node.childIds ?? []) {
+      const child = byId.get(cid);
+      if (!child) continue;
+      const cr = child.role?.value;
+      if (cr === "StaticText" || cr === "InlineTextBox") {
+        const t = child.name?.value;
+        if (typeof t === "string" && t.trim()) parts.push(t.trim());
+      } else {
+        const sub = descendantText(child, depth - 1);
+        if (sub) parts.push(sub);
+      }
+    }
+    return parts.join(" ").replace(/\s+/g, " ").trim();
+  }
+
   // Ordinal tracker: (role, name) → count
   const ordinalTracker = new Map<string, number>();
 
@@ -211,30 +260,41 @@ export async function buildInteractionGraph(
     if (axNode.ignored) continue;
 
     const rawRole = axNode.role?.value as string | undefined;
-    const role = mapRole(rawRole);
-    if (!role) continue;
+    const axName = (axNode.name?.value as string | undefined) ?? "";
+    const enrich = axNode.backendDOMNodeId !== undefined ? domEnrich.get(axNode.backendDOMNodeId) : undefined;
+
+    let role = mapRole(rawRole);
+    let label = axName;
+    if (!role) {
+      // No semantic role — but if the DOM says it's actually actionable (Chrome's
+      // click heuristic or a tabindex), infer a role so div-soup UIs aren't
+      // invisible. Role-less divs often have an empty AX name (their text sits in
+      // child StaticText nodes), so derive the label from descendant text.
+      const actionable = enrich?.clickable === true || enrich?.focusable === true;
+      if (!actionable) continue;
+      if (label === "") label = descendantText(axNode);
+      if (label === "" && enrich?.href === undefined) continue; // no usable identity
+      role = enrich?.href !== undefined ? "link" : "button";
+    }
 
     // Skip non-interactive + non-landmark nodes at L1
     if (!includeGeometry && !INTERACTIVE_ROLES.has(role) && role !== "heading" && role !== "landmark") {
       continue;
     }
 
-    const axName = (axNode.name?.value as string | undefined) ?? "";
     const props = axNode.properties;
 
-    const ordinalKey = `${role}:${axName.toLowerCase().trim()}`;
+    const ordinalKey = `${role}:${label.toLowerCase().trim()}`;
     const ordinal = (ordinalTracker.get(ordinalKey) ?? 0);
     ordinalTracker.set(ordinalKey, ordinal + 1);
 
     const explicitId = getStringProp(props, "id");
 
-    const href = role === "link" && axNode.backendDOMNodeId
-      ? await fetchHref(cdp, axNode.backendDOMNodeId)
-      : undefined;
+    const href = enrich?.href;
 
     const rawId = computeNodeId({
       role,
-      axName,
+      axName: label,
       ...(axNode.backendDOMNodeId !== undefined ? { backendDOMNodeId: axNode.backendDOMNodeId } : {}),
       ...(explicitId !== undefined ? { explicitId } : {}),
       ...(href !== undefined ? { href } : {}),
@@ -257,7 +317,7 @@ export async function buildInteractionGraph(
     const node: IGNode = {
       id: nodeId,
       role,
-      label: axName,
+      label,
       state: {
         disabled: getBoolProp(props, "disabled"),
         hidden: getBoolProp(props, "hidden"),
@@ -278,9 +338,9 @@ export async function buildInteractionGraph(
     igNodes.set(nodeId, node);
     nodeOrder.push(nodeId);
 
-    const existing = nameToIds.get(axName) ?? [];
+    const existing = nameToIds.get(label) ?? [];
     existing.push(nodeId);
-    nameToIds.set(axName, existing);
+    nameToIds.set(label, existing);
   }
 
   const serialized = JSON.stringify({ url, title, nodes: Array.from(igNodes.values()) });

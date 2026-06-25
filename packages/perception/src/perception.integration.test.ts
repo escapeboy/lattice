@@ -168,4 +168,29 @@ describeIfBrowser("@lattice/perception — integration (S2)", () => {
     const changedLabels = delta.updated.map((n) => n.label);
     expect(changedLabels.some((l) => l.includes("Submitting"))).toBe(true);
   });
+
+  // NOTE: navigates away from the form fixture — keep this test last in the block.
+  it("recovers clickable div-soup elements with inferred roles (no a11y)", async () => {
+    const page =
+      `<!DOCTYPE html><html><head><title>noa11y</title></head><body>` +
+      `<div onclick="a()" style="cursor:pointer">Home</div>` +
+      `<div onclick="b()" style="cursor:pointer">Sign In</div>` +
+      `<div onclick="c()" style="cursor:pointer">Buy Now</div>` +
+      `<div class="copy">just text, not clickable</div></body></html>`;
+    await ctx.navigate("data:text/html," + encodeURIComponent(page));
+
+    const engine = createPerceptionEngine(ctx.cdp());
+    const snap = (await engine.snapshot("L1")) as InteractionGraph;
+    const nodes = Array.from(snap.nodes.values());
+
+    // Role-less <div onclick> buttons are recovered with an inferred "button" role
+    // (Chrome's read_page only labels these "generic").
+    const buttonLabels = nodes.filter((n) => n.role === "button").map((n) => n.label);
+    expect(buttonLabels).toContain("Home");
+    expect(buttonLabels).toContain("Sign In");
+    expect(buttonLabels).toContain("Buy Now");
+
+    // A non-interactive text div must NOT be promoted to a node (stays lean).
+    expect(nodes.some((n) => n.label.includes("just text"))).toBe(false);
+  });
 });
