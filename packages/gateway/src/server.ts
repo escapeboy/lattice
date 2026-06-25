@@ -11,8 +11,11 @@
  *   policy.*    — read current policy classification
  */
 
+import { randomUUID } from "node:crypto";
+import { createServer, type IncomingMessage, type Server as HttpServer, type ServerResponse } from "node:http";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
@@ -173,12 +176,23 @@ function err(message: string) {
   return { content: [{ type: "text" as const, text: `Error: ${message}` }], isError: true as const };
 }
 
+function readBody(req: IncomingMessage): Promise<string | null> {
+  return new Promise((resolve) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (c: Buffer) => { chunks.push(c); });
+    req.on("end", () => resolve(chunks.length ? Buffer.concat(chunks).toString("utf8") : null));
+    req.on("error", () => resolve(null));
+  });
+}
+
 // ── GatewayServer ────────────────────────────────────────────────────────────
 
 export class GatewayServer {
   private readonly mcp: Server;
   private readonly sessions: SessionRegistry;
   private readonly vault: Vault;
+  private httpServer: HttpServer | null = null;
+  private httpTransport: StreamableHTTPServerTransport | null = null;
 
   constructor(
     engine: EngineAdapter,
@@ -388,8 +402,84 @@ export class GatewayServer {
     await this.mcp.connect(transport);
   }
 
+  /**
+   * Start a network-listening MCP server over Streamable HTTP (the self-hosted
+   * Docker entrypoint). Stateless JSON mode: MCP transport carries no session;
+   * browser sessions are application-level (session.create returns a sessionId
+   * the client threads through perceive/act). Endpoint: POST/GET/DELETE /mcp.
+   */
+  async startHttp(port = 8765, host = "0.0.0.0"): Promise<{ url: string }> {
+    // Stateful single-session transport: the SDK assigns an mcp-session-id on
+    // initialize and the client threads it through subsequent requests. Browser
+    // sessions remain application-level (session.create → sessionId in tool args).
+    const transport = new StreamableHTTPServerTransport({
+      sessionIdGenerator: () => randomUUID(),
+      enableJsonResponse: true,
+    });
+    // SDK's StreamableHTTPServerTransport declares onclose getter as `() => void
+    // | undefined`, which is structurally incompatible with Transport under
+    // exactOptionalPropertyTypes — a benign variance quirk; cast at the boundary.
+    await this.mcp.connect(transport as unknown as Parameters<Server["connect"]>[0]);
+    this.httpTransport = transport;
+
+    const server = createServer((req, res) => {
+      this.handleHttp(req, res, transport).catch((e: unknown) => {
+        if (!res.headersSent) res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
+      });
+    });
+    this.httpServer = server;
+
+    return new Promise((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(port, host, () => {
+        const addr = server.address();
+        if (!addr || typeof addr === "string") { reject(new Error("bad address")); return; }
+        resolve({ url: `http://${host}:${addr.port}/mcp` });
+      });
+    });
+  }
+
+  private async handleHttp(
+    req: IncomingMessage,
+    res: ServerResponse,
+    transport: StreamableHTTPServerTransport,
+  ): Promise<void> {
+    const path = (req.url ?? "/").split("?")[0];
+
+    if (path === "/health") {
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ status: "ok", server: "lattice-gateway", version: "0.1.0" }));
+      return;
+    }
+
+    if (path !== "/mcp") {
+      res.writeHead(404, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "Not found. MCP endpoint is /mcp" }));
+      return;
+    }
+
+    if (req.method === "POST") {
+      const raw = await readBody(req);
+      const body: unknown = raw ? JSON.parse(raw) : undefined;
+      await transport.handleRequest(req, res, body);
+      return;
+    }
+
+    // GET (SSE stream) and DELETE (session teardown) are handled by the transport.
+    await transport.handleRequest(req, res);
+  }
+
   async stop(): Promise<void> {
     await this.sessions.destroyAll();
+    if (this.httpServer) {
+      await new Promise<void>((resolve) => this.httpServer!.close(() => resolve()));
+      this.httpServer = null;
+    }
+    if (this.httpTransport) {
+      await this.httpTransport.close();
+      this.httpTransport = null;
+    }
     await this.mcp.close();
   }
 

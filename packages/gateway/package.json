@@ -9,10 +9,14 @@
       "types": "./dist/index.d.ts"
     }
   },
+  "bin": {
+    "lattice-gateway": "./dist/main.js"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/main.js"
   },
   "dependencies": {
     "@lattice/action": "workspace:*",
