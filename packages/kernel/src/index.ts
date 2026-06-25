@@ -7,7 +7,11 @@ export type {
   CapabilityRequest,
   EgressRequest,
   GrantDecision,
+  GrantScope,
   KernelConfig,
+  OperatorDecision,
+  OperatorRequest,
+  OperatorTier,
   PolicyClass,
   PolicyRule,
   SecurityKernel,
@@ -16,6 +20,7 @@ export type {
 
 export { taint } from "./types.js";
 export { SecurityKernelImpl } from "./kernel.js";
+export { CONSTITUTIONAL_FLOOR, OperatorGate, violatesFloor } from "./operator.js";
 
 import { SecurityKernelImpl } from "./kernel.js";
 import type { KernelConfig, SecurityKernel } from "./types.js";

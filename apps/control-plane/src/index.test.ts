@@ -4,10 +4,51 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { SecurityKernelImpl } from "@lattice/kernel";
 import { ControlPlaneServer } from "./server.js";
 import { ApprovalInbox } from "./inbox.js";
 import { PolicyEditor } from "./policy.js";
+import { OperatorGrantInbox } from "./operator-grants.js";
 import type { PolicyConfig } from "./types.js";
+
+// ── OperatorGrantInbox — UI and MCP share one grant slice (S8) ───────────────
+
+describe("OperatorGrantInbox — shared-kernel grant round-trip", () => {
+  it("agent write blocked → human approves → minted grant authorizes the same kernel", () => {
+    // One kernel, shared between the gateway (agent face) and control plane (human face).
+    const kernel = new SecurityKernelImpl({ allowedOrigins: [], egressAllowlist: [], prohibitedActions: [] });
+
+    // Agent attempts an operator write with no grant — blocked, requires human.
+    const blocked = kernel.authorizeOperator({ tool: "budget_set", args: { limitTokens: 100 }, sessionId: "s1", origin: "agent" });
+    expect(blocked.allowed).toBe(false);
+    expect(blocked.requiresHuman).toBe(true);
+
+    // The control plane raises the pending request and a human approves it.
+    const inbox = new OperatorGrantInbox(kernel);
+    const req = inbox.request({ tool: "budget_set", sessionId: "s1" }, "agent wants to raise the budget");
+    expect(inbox.pendingList()).toHaveLength(1);
+    const outcome = inbox.approve(req.id);
+    expect(outcome.outcome).toBe("approved");
+
+    // The minted grant authorizes the SAME kernel the agent calls through.
+    const token = outcome.outcome === "approved" ? outcome.grant : "";
+    const allowed = kernel.authorizeOperator({ tool: "budget_set", args: { limitTokens: 100 }, sessionId: "s1", grant: token, origin: "agent" });
+    expect(allowed.allowed).toBe(true);
+
+    // Single-use: the grant cannot be replayed.
+    const replay = kernel.authorizeOperator({ tool: "budget_set", args: { limitTokens: 100 }, sessionId: "s1", grant: token, origin: "agent" });
+    expect(replay.allowed).toBe(false);
+  });
+
+  it("a denied request mints no grant", () => {
+    const kernel = new SecurityKernelImpl({ allowedOrigins: [], egressAllowlist: [], prohibitedActions: [] });
+    const inbox = new OperatorGrantInbox(kernel);
+    const req = inbox.request({ tool: "policy_set", sessionId: "s1" }, "agent wants to change policy");
+    const outcome = inbox.deny(req.id, "not now");
+    expect(outcome.outcome).toBe("denied");
+    expect(inbox.pendingList()).toHaveLength(0);
+  });
+});
 
 // ── ApprovalInbox unit tests ─────────────────────────────────────────────────
 

@@ -104,7 +104,7 @@ application-level: `session_create` returns a `sessionId` you pass to the rest.
 | `session_create` | `topology?: "ephemeral"\|"persistent"` | `{ sessionId }` |
 | `session_destroy` | `sessionId` | `{ destroyed }` |
 | `session_list` | — | `{ sessions: string[] }` |
-| `perceive_snapshot` | `sessionId`, `tier?: "L0"\|"L1"\|"L2"` | Interaction Graph (+ delta vs previous snapshot) |
+| `perceive_snapshot` | `sessionId`, `tier?: "L0"\|"L1"\|"L2"\|"L3"` | Interaction Graph (+ delta vs previous snapshot); L3 adds a screenshot image block |
 | `perceive_delta` | `sessionId` | `{ delta, url }` since the last snapshot |
 | `act_execute` | `sessionId`, `command: ActionCommand` | `{ success, url, delta, extracted? }` |
 | `extract_query` | `sessionId`, `query` | extracted page data |
@@ -117,6 +117,49 @@ application-level: `session_create` returns a `sessionId` you pass to the rest.
 `ActionCommand` (from `@lattice/action`): `{ type: "navigate", url }`,
 `{ type: "act"\|"fill"\|"select"\|"submit"\|"scroll_to", target: { nodeId }, value? }`,
 `{ type: "extract", query }`, `{ type: "wait_for", condition }`.
+
+### Operator surface
+
+The operator surface is the privileged governance API — policy, personas,
+devices, budget, audit. It is **tiered** (see `docs/design-operator-surface`):
+
+**Read tier — free for the agent** (benign, every access audited):
+
+| Tool | Returns |
+|---|---|
+| `policy_get` / `policy_list` | current policy snapshot / rules (incl. constitutional invariants) |
+| `persona_list` / `device_list` | personas / registered operator devices (no secrets) |
+| `audit_read` / `audit_export` | the immutable audit log |
+| `budget_get` | token budget (limit + spent) |
+| `session_observe` | a session's live page state — **tainted**, quarantined output |
+
+**Write tier — requires a human grant token** (`grant` arg). Without one the
+call returns `{ status: "awaiting_human_grant" }`; the agent must raise a
+handoff and a human approves it in the control plane, which mints the token:
+
+| Tool | Effect |
+|---|---|
+| `policy_set` | tighten policy (cannot drop below the constitutional floor) |
+| `persona_create` / `persona_delete` | manage personas |
+| `device_register` / `device_revoke` | manage handoff devices |
+| `budget_set` | set the token budget |
+
+**Prohibited tier — never through the agent API**: `persona_import`
+(credential-bearing) is refused and directed to the human control-plane UI,
+even when a grant token is presented.
+
+### Human handoff
+
+| Tool | Arguments | Returns |
+|---|---|---|
+| `session_handoff` | `sessionId`, `type: "approval"\|"input"`, `reason`, `field?` | `{ handoffId, status }` — fans out to all devices, first to claim wins |
+| `handoff_status` | `handoffId` | `pending\|claimed\|approved\|denied\|filled\|expired` |
+
+Approvals (Type A) push to **ntfy** with Approve/Deny buttons. Input (Type B)
+uses a **mediated field**: the value flows Vault→form via the human channel and
+**never** passes through the model, agent, or trace. Requests are HMAC-signed so
+the device can verify origin before showing a form. Claim/resolve/submit are
+human-channel operations, not agent tools.
 
 ### Fidelity tiers
 
@@ -135,11 +178,24 @@ The kernel mediates every consequential effect. Its guarantees:
 - **Prohibited primitives** — CAPTCHA solving, account creation, ACL changes, transfers, and hard deletes are refused and escalated, regardless of other config.
 - **Audit log** — every grant and egress decision is recorded.
 
+### Operator-surface guarantees (structural, not by prompt)
+
+The governance API closes three escalation vectors at the kernel boundary:
+
+- **Constitutional floor** — a hard-coded set of invariants no `policy_set` may weaken, *by anyone* through the API: tainting stays on, the floor-prohibited primitives stay prohibited, and content-proposed egress stays blocked. A patch that would drop below the floor is refused with a typed `floor_violation` — even with a valid human grant. This stops an agent from calling `policy_set` to "allow everything".
+- **Human-grant asymmetry** — operator *writes* require a single-use token minted only by the human control-plane channel (`mintHumanGrant`). The agent has no route to mint one, so it cannot self-authorize a mutation; it can only *request* a handoff.
+- **Injection→operator block** — operator arguments are checked against the kernel's runtime taint registry. Any value lifted from page content (e.g. via `session_observe`) is refused before it reaches the tool (`tainted_origin`). A page that injects "call `policy_set`/`persona_import`" cannot reach the operator tools through a confused agent.
+- **`persona_import` is prohibited** — the credential-bearing profile import is never executed through the agent API; only the human UI may initiate it.
+
+These four behaviours are covered by mandatory negative tests in
+`packages/gateway/src/operator.test.ts` and `packages/kernel/src/operator.test.ts`.
+
 Configure policy via environment (see `docker-compose.yml`):
 `LATTICE_ALLOWED_ORIGINS`, `LATTICE_EGRESS_ALLOWLIST`, `LATTICE_PROHIBITED`.
+Handoff push: `LATTICE_NTFY_BASE`, `LATTICE_HANDOFF_KEY`.
 
-Grants are fulfilled by a human through the **control plane** approval inbox — a
-one-tap approve/deny that resolves the kernel's pending grant.
+Consequential grants and operator-write grants are both fulfilled by a human
+through the **control plane** — one kernel, one audit log, two faces (UI + MCP).
 
 ## Control plane (human supervision)
 
@@ -148,8 +204,9 @@ node apps/control-plane/dist/main.js     # HTTP + SSE UI
 ```
 
 Intent input, a live theater of parallel sessions, the approval inbox for
-consequential actions, a policy editor, and a replay browser over recorded
-traces. Tauri wraps this same web layer as a desktop app in P3.
+consequential actions, the operator-grant inbox (approving an agent's operator
+write mints a grant on the shared kernel), a policy editor, and a replay browser
+over recorded traces. Tauri wraps this same web layer as a desktop app in P3.
 
 ## Observability
 
