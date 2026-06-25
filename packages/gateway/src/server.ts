@@ -26,6 +26,7 @@ import type { GrantScope, OperatorRequest, SecurityKernel } from "@lattice/kerne
 import { SessionRegistry } from "./sessions.js";
 import { Vault } from "./vault.js";
 import { OperatorStore, type DeviceChannel, type PolicySnapshot } from "./operator.js";
+import { HandoffManager, NullTransport, type HandoffType, type NotificationTransport } from "./handoff.js";
 
 // ── Tool definitions ─────────────────────────────────────────────────────────
 
@@ -285,6 +286,32 @@ const TOOLS = [
     },
   },
 
+  // ── Human handoff (S8.5) — agent may REQUEST, humans resolve ─────────────────
+  {
+    name: "session_handoff",
+    description: "Raise a human handoff when the agent hits a wall it must not cross alone (login/2FA/captcha/confirm). type=approval (confirm/deny) or input (a single field, e.g. a 2FA code). Fans out to all registered operator devices; first to claim wins. The agent does not block — poll handoff_status. For input, the value flows Vault→form via the human channel, never through the agent.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        sessionId: { type: "string" },
+        type: { type: "string", enum: ["approval", "input"], default: "approval" },
+        reason: { type: "string" },
+        field: { type: "string", description: "For input handoffs: which field the human is asked to provide" },
+        ttlMs: { type: "number" },
+      },
+      required: ["sessionId", "reason"],
+    },
+  },
+  {
+    name: "handoff_status",
+    description: "Poll the status of a raised handoff (pending/claimed/approved/denied/filled/expired)",
+    inputSchema: {
+      type: "object" as const,
+      properties: { handoffId: { type: "string" } },
+      required: ["handoffId"],
+    },
+  },
+
   // ── Operator surface — PROHIBITED tier (never through this API) ───────────────
   {
     name: "persona_import",
@@ -331,17 +358,23 @@ export class GatewayServer {
   private readonly vault: Vault;
   private readonly kernel: SecurityKernel;
   private readonly operatorStore: OperatorStore;
+  private readonly handoff: HandoffManager;
   private httpServer: HttpServer | null = null;
   private httpTransport: StreamableHTTPServerTransport | null = null;
 
   constructor(
     engine: EngineAdapter,
     kernel: SecurityKernel,
+    opts?: { handoffTransport?: NotificationTransport; handoffSigningKey?: string },
   ) {
     this.kernel = kernel;
     this.sessions = new SessionRegistry(engine, kernel);
     this.vault = new Vault();
     this.operatorStore = new OperatorStore();
+    this.handoff = new HandoffManager(
+      opts?.handoffTransport ?? new NullTransport(),
+      opts?.handoffSigningKey ?? randomUUID(),
+    );
     this.mcp = new Server(
       { name: "lattice-gateway", version: "0.1.0" },
       { capabilities: { tools: {} } },
@@ -357,6 +390,29 @@ export class GatewayServer {
    */
   mintOperatorGrant(scope: GrantScope): string {
     return this.kernel.mintHumanGrant(scope);
+  }
+
+  /** Control-plane seam: the live handoff manager (claim/resolve/input + audit). */
+  get handoffs(): HandoffManager {
+    return this.handoff;
+  }
+
+  /**
+   * Control-plane seam: fulfil a Type B (input) handoff by writing the value
+   * into the claimed session's field. The value flows here → form and is never
+   * retained or logged — the human channel sources it (Vault/PWA), not the agent.
+   */
+  submitHandoffInput(
+    handoffId: string,
+    deviceId: string,
+    sessionId: string,
+    fieldNodeId: string,
+    value: string,
+  ): Promise<boolean> {
+    const session = this.getSession(sessionId);
+    return this.handoff.submitInput(handoffId, deviceId, value, (v) =>
+      session.action.execute({ type: "fill", target: { nodeId: fieldNodeId as never }, value: v }).then(() => undefined),
+    );
   }
 
   private registerHandlers(): void {
@@ -624,6 +680,38 @@ export class GatewayServer {
       case "device_revoke":
       case "budget_set":
         return this.dispatchOperatorWrite(name, a);
+
+      // ── Human handoff (S8.5) ─────────────────────────────────────────────────
+      case "session_handoff": {
+        const session = this.getSession(a["sessionId"] as string);
+        const type = ((a["type"] as string | undefined) ?? "approval") as HandoffType;
+        const req = await this.handoff.raise(
+          {
+            type,
+            sessionId: session.id,
+            origin: session.context.currentUrl(),
+            reason: a["reason"] as string,
+            ...(typeof a["field"] === "string" ? { field: a["field"] } : {}),
+            ...(typeof a["ttlMs"] === "number" ? { ttlMs: a["ttlMs"] } : {}),
+          },
+          this.operatorStore.listDevices(),
+        );
+        return ok({
+          handoffId: req.id,
+          status: req.status,
+          type: req.type,
+          notifiedDevices: this.operatorStore.listDevices().length,
+          note: type === "input"
+            ? "input value will flow Vault→form via the human channel — never request it through the agent"
+            : "awaiting human approve/deny — poll handoff_status",
+        });
+      }
+
+      case "handoff_status": {
+        const status = this.handoff.status(a["handoffId"] as string);
+        if (status === undefined) return err(`Handoff ${a["handoffId"] as string} not found`);
+        return ok({ handoffId: a["handoffId"], status });
+      }
 
       // ── Operator surface — PROHIBITED tier ───────────────────────────────────
       case "persona_import": {
