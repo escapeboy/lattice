@@ -13,12 +13,17 @@
 
 import { randomUUID } from "node:crypto";
 import { taint } from "./types.js";
+import { OperatorGate } from "./operator.js";
 import type {
   AuditEvent,
   CapabilityRequest,
   EgressRequest,
   GrantDecision,
+  GrantScope,
   KernelConfig,
+  OperatorDecision,
+  OperatorRequest,
+  OperatorTier,
   PolicyClass,
   SecurityKernel,
   TaintedStr,
@@ -66,6 +71,7 @@ const BENIGN_DEFAULTS = new Set([
 
 export class SecurityKernelImpl implements SecurityKernel {
   private readonly log: AuditEvent[] = [];
+  private readonly operator = new OperatorGate();
 
   constructor(private readonly config: KernelConfig) {}
 
@@ -196,7 +202,30 @@ export class SecurityKernelImpl implements SecurityKernel {
   }
 
   taintContent(raw: string): TaintedStr {
+    this.operator.registerTaint(raw);
     return taint(raw);
+  }
+
+  operatorTier(tool: string): OperatorTier {
+    return this.operator.tier(tool);
+  }
+
+  mintHumanGrant(scope: GrantScope): string {
+    return this.operator.mintGrant(scope);
+  }
+
+  authorizeOperator(req: OperatorRequest): OperatorDecision {
+    const decision = this.operator.authorize(req);
+    this.emit({
+      kind: "operator",
+      origin: req.origin,
+      sessionId: req.sessionId,
+      detail:
+        `operator ${req.tool} (${decision.tier}) ` +
+        `${decision.allowed ? "allowed" : "blocked"}: ${decision.reason}`,
+      granted: decision.allowed,
+    });
+    return decision;
   }
 
   auditLog(): ReadonlyArray<AuditEvent> {

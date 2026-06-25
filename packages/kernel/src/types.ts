@@ -27,11 +27,47 @@ export interface GrantDecision {
 
 export interface AuditEvent {
   readonly ts: number;
-  readonly kind: "grant" | "egress" | "policy" | "prohibited";
+  readonly kind: "grant" | "egress" | "policy" | "prohibited" | "operator";
   readonly origin: string;
   readonly sessionId: string;
   readonly detail: string;
   readonly granted: boolean;
+}
+
+/** Operator-surface privilege tiers (see design-operator-surface.md). */
+export type OperatorTier = "read" | "write" | "prohibited";
+
+/**
+ * A single operator-surface invocation arriving at the kernel for authorization.
+ * `grant` is a token minted by the human control-plane channel — the agent has
+ * no API to mint one, which is the structural guarantee that write-tier
+ * mutations cannot be self-authorized.
+ */
+export interface OperatorRequest {
+  readonly tool: string;
+  readonly args: Record<string, unknown>;
+  readonly sessionId: string;
+  readonly origin: string;
+  /** Human grant token, if the control plane minted one for this operation. */
+  readonly grant?: string;
+}
+
+export interface OperatorDecision {
+  readonly allowed: boolean;
+  readonly tier: OperatorTier;
+  readonly reason: string;
+  /** Agent must raise a human handoff to obtain a grant before retrying. */
+  readonly requiresHuman: boolean;
+  /** The request tried to move policy below the constitutional floor. */
+  readonly floorViolation: boolean;
+  /** A tainted (page-origin) value was detected among the args. */
+  readonly taintedOrigin: boolean;
+}
+
+/** Scope a minted human grant is bound to — single operation, single session. */
+export interface GrantScope {
+  readonly tool: string;
+  readonly sessionId: string;
 }
 
 export interface EgressRequest {
@@ -66,6 +102,16 @@ export interface SecurityKernel {
   checkEgress(req: EgressRequest): boolean;
   /** Wrap page content in TaintedStr — it must never escape the quarantined channel. */
   taintContent(raw: string): TaintedStr;
+  /** Classify an operator-surface tool into its privilege tier. */
+  operatorTier(tool: string): OperatorTier;
+  /**
+   * Mint a single-use grant token for an operator write. ONLY the human
+   * control-plane channel calls this (after an approval). The agent path has
+   * no route to it — that asymmetry is the structural authorization boundary.
+   */
+  mintHumanGrant(scope: GrantScope): string;
+  /** Authorize an operator-surface invocation against tier/floor/grant/taint. */
+  authorizeOperator(req: OperatorRequest): OperatorDecision;
   auditLog(): ReadonlyArray<AuditEvent>;
   clearAuditLog(): void;
 }
