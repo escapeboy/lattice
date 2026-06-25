@@ -1,0 +1,19 @@
+{
+  "name": "@lattice/root",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r --filter './packages/*' --filter './apps/*' build",
+    "test": "pnpm -r --filter './packages/*' --filter './apps/*' test",
+    "lint": "eslint 'packages/*/src/**/*.ts' 'apps/*/src/**/*.ts'"
+  },
+  "devDependencies": {
+    "@eslint/js": "catalog:",
+    "@types/node": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "typescript-eslint": "catalog:",
+    "vitest": "catalog:"
+  }
+}

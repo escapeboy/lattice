@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "files": [],
+  "references": [
+    { "path": "./packages/engine" },
+    { "path": "./packages/perception" },
+    { "path": "./packages/action" },
+    { "path": "./packages/runtime" },
+    { "path": "./packages/kernel" },
+    { "path": "./packages/gateway" },
+    { "path": "./packages/sdk-ts" },
+    { "path": "./apps/control-plane" }
+  ]
+}
