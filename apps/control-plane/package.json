@@ -15,8 +15,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@lattice/sdk-ts": "workspace:*",
-    "@lattice/kernel": "workspace:*"
+    "@lattice/kernel": "workspace:*",
+    "@lattice/observability": "workspace:*",
+    "@lattice/sdk-ts": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",

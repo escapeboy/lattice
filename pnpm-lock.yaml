@@ -53,6 +53,9 @@ importers:
       '@lattice/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
+      '@lattice/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
       '@lattice/sdk-ts':
         specifier: workspace:*
         version: link:../../packages/sdk-ts

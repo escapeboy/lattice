@@ -1,33 +1,18 @@
 /**
- * @lattice/control-plane — Human supervision UI (S0 scaffold; Tauri shell in S8)
+ * @lattice/control-plane — Human supervision UI (S8).
  *
- * Surfaces: intent input, live session theater, approval inbox, policy editor, replay browser.
+ * HTTP + SSE server: intent input, live session theater, approval inbox,
+ * policy editor, replay browser. Tauri shell wraps this for desktop (P3).
  */
 
-export type ControlPlaneMode = "desktop" | "web";
-
-export interface ControlPlaneConfig {
-  mode: ControlPlaneMode;
-  gatewayEndpoint: string;
-}
-
-export interface ApprovalRequest {
-  readonly id: string;
-  readonly sessionId: string;
-  readonly origin: string;
-  readonly actionType: string;
-  readonly summary: string;
-  readonly createdAt: number;
-}
-
-export interface ControlPlane {
-  start(config: ControlPlaneConfig): Promise<void>;
-  pendingApprovals(): Promise<ReadonlyArray<ApprovalRequest>>;
-  approve(requestId: string): Promise<void>;
-  deny(requestId: string, reason: string): Promise<void>;
-  stop(): Promise<void>;
-}
-
-export function createControlPlane(): ControlPlane {
-  throw new Error("Not implemented — see S8");
-}
+export { ControlPlaneServer } from "./server.js";
+export { ApprovalInbox } from "./inbox.js";
+export { PolicyEditor } from "./policy.js";
+export { buildUI } from "./ui.js";
+export type {
+  ApprovalDecision,
+  ApprovalOutcome,
+  ApprovalRequest,
+  PolicyConfig,
+  SessionView,
+} from "./types.js";
