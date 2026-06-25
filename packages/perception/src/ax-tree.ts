@@ -46,6 +46,10 @@ interface GetAttributesResult {
   attributes: string[];
 }
 
+interface PushNodesResult {
+  nodeIds: number[];
+}
+
 // ── Role mapping ──────────────────────────────────────────────────────────────
 
 const ROLE_MAP: Record<string, NodeRole> = {
@@ -117,6 +121,19 @@ function getStringProp(props: Array<{ name: string; value: AXValue }> | undefine
   return typeof v === "string" ? v : undefined;
 }
 
+/** AX numeric properties (e.g. heading "level") arrive as integers, not strings. */
+function getNumberProp(props: Array<{ name: string; value: AXValue }> | undefined, name: string): number | undefined {
+  if (!props) return undefined;
+  const prop = props.find((p) => p.name === name);
+  const v = prop?.value.value;
+  if (typeof v === "number") return v;
+  if (typeof v === "string") {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : undefined;
+  }
+  return undefined;
+}
+
 // ── Geometry fetching (optional — L2 only) ──────────────────────────────────
 
 async function fetchGeometry(cdp: CDPHandle, backendNodeId: number): Promise<NodeGeometry | undefined> {
@@ -138,16 +155,20 @@ async function fetchGeometry(cdp: CDPHandle, backendNodeId: number): Promise<Nod
 
 async function fetchHref(cdp: CDPHandle, backendNodeId: number): Promise<string | undefined> {
   try {
-    const { root } = await cdp.send<GetDocumentResult>("DOM.getDocument", { depth: 0 });
-    const { nodeId } = await cdp.send<{ nodeId: number }>("DOM.pushNodesByBackendIdsToFrontend", {
-      backendNodeIds: [backendNodeId],
-    }).catch(() => ({ nodeId: 0 }));
-    if (!nodeId) return undefined;
-    const { attributes } = await cdp.send<GetAttributesResult>("DOM.getAttributes", { nodeId });
-    const hrefIdx = attributes.indexOf("href");
-    if (hrefIdx === -1) return undefined;
-    void root; // used implicitly via DOM session
-    return attributes[hrefIdx + 1];
+    // DOM.getDocument must be requested once so the backend→frontend node map exists.
+    await cdp.send<GetDocumentResult>("DOM.getDocument", { depth: 0 });
+    // pushNodesByBackendIdsToFrontend returns `nodeIds` (plural array), not `nodeId`.
+    const { nodeIds } = await cdp
+      .send<PushNodesResult>("DOM.pushNodesByBackendIdsToFrontend", { backendNodeIds: [backendNodeId] })
+      .catch(() => ({ nodeIds: [] as number[] }));
+    const frontendId = nodeIds[0];
+    if (!frontendId) return undefined;
+    const { attributes } = await cdp.send<GetAttributesResult>("DOM.getAttributes", { nodeId: frontendId });
+    // attributes is a flat [name, value, name, value, …] list — scan name slots only.
+    for (let i = 0; i < attributes.length; i += 2) {
+      if (attributes[i] === "href") return attributes[i + 1];
+    }
+    return undefined;
   } catch {
     return undefined;
   }
@@ -231,7 +252,7 @@ export async function buildInteractionGraph(
     // (Full relation wiring comes in S2 polish — tracked in LabelledBy/Controls props)
 
     const rawValue = axNode.value?.value as string | undefined;
-    const rawLevel = role === "heading" ? Number(getStringProp(props, "level") ?? "0") || undefined : undefined;
+    const rawLevel = role === "heading" ? getNumberProp(props, "level") : undefined;
 
     const node: IGNode = {
       id: nodeId,

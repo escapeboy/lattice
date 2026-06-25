@@ -132,6 +132,25 @@ describeIfBrowser("@lattice/perception — integration (S2)", () => {
     expect(disabledBtn?.label).toContain("Cancel");
   });
 
+  it("populates href on links and level on headings (regression)", async () => {
+    const engine = createPerceptionEngine(ctx.cdp());
+    const snap = await engine.snapshot("L1") as InteractionGraph;
+    const nodes = Array.from(snap.nodes.values());
+
+    // href: pushNodesByBackendIdsToFrontend returns `nodeIds` (plural) — a prior
+    // bug destructured `nodeId` and left every link's href undefined.
+    const links = nodes.filter((n) => n.role === "link");
+    expect(links.length).toBeGreaterThanOrEqual(2);
+    const hrefs = links.map((l) => l.href);
+    expect(hrefs).toContain("/home");
+    expect(hrefs).toContain("/about");
+
+    // heading level: the AX "level" property is an integer, not a string.
+    const h1 = nodes.find((n) => n.role === "heading" && n.label.includes("Registration"));
+    expect(h1).toBeDefined();
+    expect(h1!.level).toBe(1);
+  });
+
   it("delta shows only changed nodes after label update via JS", async () => {
     const engine = createPerceptionEngine(ctx.cdp());
     const snap1 = await engine.snapshot("L1") as InteractionGraph;
