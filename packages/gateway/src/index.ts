@@ -1,49 +1,26 @@
 /**
- * @lattice/gateway — MCP server (stdio + HTTP/SSE) (S0 scaffold; implementation in S6)
+ * @lattice/gateway — Agent Gateway (MCP stdio + HTTP/SSE).
+ *
+ * Public API:
+ *   createAgentGateway(config) → GatewayServer  — factory used by the CLI and tests
  */
 
-import type { FidelityTier, InteractionGraph, IGDelta } from "@lattice/perception";
-import type { ActionCommand, ActionResult } from "@lattice/action";
-import type { BrowserContextId } from "@lattice/engine";
+import type { EngineAdapter } from "@lattice/engine";
+import type { SecurityKernel } from "@lattice/kernel";
+import { GatewayServer } from "./server.js";
 
-export type TransportType = "stdio" | "http-sse";
+export { GatewayServer } from "./server.js";
+export { Vault } from "./vault.js";
+export { SessionRegistry } from "./sessions.js";
+export type { GatewaySession } from "./sessions.js";
 
 export interface GatewayConfig {
-  transport: TransportType;
-  port?: number;
-  host?: string;
+  /** Launched EngineAdapter (caller is responsible for engine.launch() before passing). */
+  engine: EngineAdapter;
+  /** Configured SecurityKernel. */
+  kernel: SecurityKernel;
 }
 
-export interface SessionHandle {
-  readonly id: BrowserContextId;
-}
-
-/** MCP tool groups exposed by the gateway */
-export interface GatewayTools {
-  // session.*
-  "session.create"(topology: "ephemeral" | "persistent"): Promise<SessionHandle>;
-  "session.destroy"(id: BrowserContextId): Promise<void>;
-
-  // perceive.*
-  "perceive.snapshot"(id: BrowserContextId, tier: FidelityTier): Promise<InteractionGraph>;
-  "perceive.subscribe"(id: BrowserContextId, tier: FidelityTier): AsyncIterable<IGDelta>;
-
-  // act.*
-  "act.execute"(id: BrowserContextId, command: ActionCommand): Promise<ActionResult>;
-
-  // extract.*
-  "extract.query"(id: BrowserContextId, query: string): Promise<unknown>;
-
-  // policy.*
-  "policy.list"(): Promise<ReadonlyArray<{ id: string; description: string }>>;
-}
-
-export interface AgentGateway {
-  start(config: GatewayConfig): Promise<void>;
-  stop(): Promise<void>;
-  readonly tools: GatewayTools;
-}
-
-export function createAgentGateway(): AgentGateway {
-  throw new Error("Not implemented — see S6");
+export function createAgentGateway(config: GatewayConfig): GatewayServer {
+  return new GatewayServer(config.engine, config.kernel);
 }

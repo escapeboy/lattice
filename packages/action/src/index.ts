@@ -4,6 +4,7 @@
 
 export type {
   ActionCommand,
+  ActionEngine,
   ActionErrorCode,
   ActionResult,
   ActionTarget,
