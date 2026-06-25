@@ -9,6 +9,7 @@ import type { PerceptionEngine, InteractionGraph } from "@lattice/perception";
 import { createActionEngine } from "@lattice/action";
 import type { ActionEngine } from "@lattice/action";
 import type { SecurityKernel } from "@lattice/kernel";
+import { TraceRecorder } from "@lattice/observability";
 
 export interface GatewaySession {
   readonly id: string;
@@ -19,6 +20,8 @@ export interface GatewaySession {
   lastSnapshot: InteractionGraph | undefined;
   /** Active delta subscriptions (intervalId → cleanup fn). */
   readonly subscriptions: Map<string, () => void>;
+  /** Trace recorder for this session. */
+  readonly recorder: TraceRecorder;
 }
 
 export class SessionRegistry {
@@ -35,13 +38,15 @@ export class SessionRegistry {
     const perception = createPerceptionEngine(ctx.cdp());
     const action = createActionEngine(ctx.cdp(), ctx, perception);
 
+    const id = randomUUID();
     const session: GatewaySession = {
-      id: randomUUID(),
+      id,
       context: ctx,
       perception,
       action,
       lastSnapshot: undefined,
       subscriptions: new Map(),
+      recorder: new TraceRecorder(id, topology),
     };
     this.sessions.set(session.id, session);
     return session;
@@ -54,8 +59,8 @@ export class SessionRegistry {
   async destroy(id: string): Promise<void> {
     const session = this.sessions.get(id);
     if (!session) return;
-    // Clean up subscriptions
     for (const cleanup of session.subscriptions.values()) cleanup();
+    session.recorder.finish(); // finalize trace
     this.sessions.delete(id);
     await session.context.close();
   }

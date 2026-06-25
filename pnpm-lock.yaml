@@ -113,6 +113,9 @@ importers:
       '@lattice/kernel':
         specifier: workspace:*
         version: link:../kernel
+      '@lattice/observability':
+        specifier: workspace:*
+        version: link:../observability
       '@lattice/perception':
         specifier: workspace:*
         version: link:../perception
@@ -134,6 +137,28 @@ importers:
         version: 3.2.6(@types/node@22.20.0)
 
   packages/kernel:
+    dependencies:
+      '@lattice/action':
+        specifier: workspace:*
+        version: link:../action
+      '@lattice/engine':
+        specifier: workspace:*
+        version: link:../engine
+      '@lattice/perception':
+        specifier: workspace:*
+        version: link:../perception
+    devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.20.0
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.6(@types/node@22.20.0)
+
+  packages/observability:
     dependencies:
       '@lattice/action':
         specifier: workspace:*

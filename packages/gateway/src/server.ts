@@ -236,14 +236,20 @@ export class GatewayServer {
         const snap = await session.perception.snapshot(tier);
 
         if (snap.tier === "L0") {
+          session.recorder.recordSnapshot(tier, snap.url, snap.title ?? "", []);
           return ok(snap);
         }
 
         const ig: InteractionGraph = snap;
-        // Serialize Map → array for JSON transport
         const nodes = Array.from(ig.nodes.values());
         const prev = session.lastSnapshot;
         session.lastSnapshot = ig;
+
+        session.recorder.recordSnapshot(ig.tier, ig.url, ig.title ?? "", nodes);
+        if (prev) {
+          const d = session.perception.delta(prev, ig);
+          session.recorder.recordDelta(d.added.length, d.removed.length, d.updated.length, ig.url);
+        }
 
         return ok({
           tier: ig.tier,
@@ -260,8 +266,9 @@ export class GatewayServer {
         const session = this.getSession(a["sessionId"] as string);
         if (!session.lastSnapshot) return ok({ delta: null, reason: "no prior snapshot" });
 
-        const current = await session.perception.snapshot("L1") as InteractionGraph;
+        const current = (await session.perception.snapshot("L1")) as InteractionGraph;
         const delta = session.perception.delta(session.lastSnapshot, current);
+        session.recorder.recordDelta(delta.added.length, delta.removed.length, delta.updated.length, current.url);
         session.lastSnapshot = current;
         return ok({ delta, url: current.url });
       }
@@ -270,22 +277,30 @@ export class GatewayServer {
       case "act.execute": {
         const session = this.getSession(a["sessionId"] as string);
         const command = a["command"] as Parameters<typeof session.action.execute>[0];
-        const result = await session.action.execute(command);
-        return ok({
-          success: result.success,
-          url: result.url,
-          delta: result.delta,
-          ...(result.extracted !== undefined ? { extracted: result.extracted } : {}),
-        });
+        session.recorder.recordAction(command);
+        try {
+          const result = await session.action.execute(command);
+          session.recorder.recordActionResult(result.success, result.url, result.extracted);
+          return ok({
+            success: result.success,
+            url: result.url,
+            delta: result.delta,
+            ...(result.extracted !== undefined ? { extracted: result.extracted } : {}),
+          });
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          session.recorder.recordActionResult(false, session.context.currentUrl(), undefined, msg);
+          throw e;
+        }
       }
 
       // ── extract.* ──────────────────────────────────────────────────────────
       case "extract.query": {
         const session = this.getSession(a["sessionId"] as string);
-        const result = await session.action.execute({
-          type: "extract",
-          query: a["query"] as string,
-        });
+        const query = a["query"] as string;
+        session.recorder.recordAction({ type: "extract", query });
+        const result = await session.action.execute({ type: "extract", query });
+        session.recorder.recordActionResult(result.success, result.url, result.extracted);
         return ok({ result: result.extracted });
       }
 

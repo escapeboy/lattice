@@ -1,5 +1,5 @@
 {
-  "name": "@lattice/gateway",
+  "name": "@lattice/observability",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -17,11 +17,7 @@
   "dependencies": {
     "@lattice/action": "workspace:*",
     "@lattice/engine": "workspace:*",
-    "@lattice/kernel": "workspace:*",
-    "@lattice/observability": "workspace:*",
-    "@lattice/perception": "workspace:*",
-    "@lattice/runtime": "workspace:*",
-    "@modelcontextprotocol/sdk": "^1.29.0"
+    "@lattice/perception": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",
