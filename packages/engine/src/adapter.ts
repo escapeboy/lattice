@@ -69,6 +69,13 @@ class ContextHandleImpl implements ContextHandle {
     return this._cdp;
   }
 
+  async screenshot(): Promise<string> {
+    const { data } = await this._cdp.send<{ data: string }>("Page.captureScreenshot", {
+      format: "png",
+    });
+    return data;
+  }
+
   async close(): Promise<void> {
     await this.pwContext.close();
   }

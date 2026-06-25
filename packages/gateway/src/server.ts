@@ -55,12 +55,12 @@ const TOOLS = [
   },
   {
     name: "perceive_snapshot",
-    description: "Get Interaction Graph snapshot of the current page (L0=summary, L1=default IG, L2=with geometry)",
+    description: "Get Interaction Graph snapshot of the current page (L0=summary, L1=default IG, L2=with geometry, L3=IG + screenshot for canvas/invisible UI)",
     inputSchema: {
       type: "object" as const,
       properties: {
         sessionId: { type: "string" },
-        tier: { type: "string", enum: ["L0", "L1", "L2"], default: "L1" },
+        tier: { type: "string", enum: ["L0", "L1", "L2", "L3"], default: "L1" },
       },
       required: ["sessionId"],
     },
@@ -168,12 +168,20 @@ const TOOLS = [
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
-function ok(data: unknown) {
-  return { content: [{ type: "text" as const, text: JSON.stringify(data, null, 2) }] };
+type ContentBlock =
+  | { type: "text"; text: string }
+  | { type: "image"; data: string; mimeType: string };
+type ToolResult = {
+  content: ContentBlock[];
+  isError?: boolean;
+};
+
+function ok(data: unknown): ToolResult {
+  return { content: [{ type: "text", text: JSON.stringify(data, null, 2) }] };
 }
 
-function err(message: string) {
-  return { content: [{ type: "text" as const, text: `Error: ${message}` }], isError: true as const };
+function err(message: string): ToolResult {
+  return { content: [{ type: "text", text: `Error: ${message}` }], isError: true };
 }
 
 function readBody(req: IncomingMessage): Promise<string | null> {
@@ -225,7 +233,7 @@ export class GatewayServer {
   private async dispatch(
     name: string,
     a: Record<string, unknown>,
-  ): Promise<ReturnType<typeof ok>> {
+  ): Promise<ToolResult> {
     switch (name) {
       // ── session.* ──────────────────────────────────────────────────────────
       case "session_create": {
@@ -265,15 +273,29 @@ export class GatewayServer {
           session.recorder.recordDelta(d.added.length, d.removed.length, d.updated.length, ig.url);
         }
 
-        return ok({
-          tier: ig.tier,
+        const payload = {
+          tier: tier === "L3" ? "L3" : ig.tier,
           url: ig.url,
           title: ig.title,
           nodeCount: nodes.length,
           serializedSize: ig.serializedSize,
           nodes,
           ...(prev ? { delta: session.perception.delta(prev, ig) } : {}),
-        });
+        };
+
+        // L3 = pixel tier: ship the IG plus a screenshot so a vision-capable
+        // agent can reason about canvas/WebGL UIs the AX tree can't represent.
+        if (tier === "L3") {
+          const data = await session.context.screenshot();
+          return {
+            content: [
+              { type: "text", text: JSON.stringify(payload, null, 2) },
+              { type: "image", data, mimeType: "image/png" },
+            ],
+          };
+        }
+
+        return ok(payload);
       }
 
       case "perceive_delta": {

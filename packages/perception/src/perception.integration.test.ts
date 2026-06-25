@@ -193,4 +193,22 @@ describeIfBrowser("@lattice/perception — integration (S2)", () => {
     // A non-interactive text div must NOT be promoted to a node (stays lean).
     expect(nodes.some((n) => n.label.includes("just text"))).toBe(false);
   });
+
+  it("does not duplicate a clickable wrapper around a real control", async () => {
+    // Outer div is clickable (onclick) but wraps a real <button>. The button is
+    // captured with its proper role; the wrapper must be dropped, not emitted as
+    // a second inferred "button" with the same aggregated label.
+    const page =
+      `<!DOCTYPE html><html><head><title>wrap</title></head><body>` +
+      `<div onclick="x()" style="cursor:pointer"><button onclick="y()">Real</button></div>` +
+      `</body></html>`;
+    await ctx.navigate("data:text/html," + encodeURIComponent(page));
+
+    const engine = createPerceptionEngine(ctx.cdp());
+    const snap = (await engine.snapshot("L1")) as InteractionGraph;
+    const realButtons = Array.from(snap.nodes.values()).filter(
+      (n) => n.role === "button" && n.label === "Real",
+    );
+    expect(realButtons).toHaveLength(1);
+  });
 });
