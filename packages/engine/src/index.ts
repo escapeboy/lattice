@@ -1,26 +1,26 @@
 /**
- * @lattice/engine — CDP adapter layer (S0 scaffold; implementation in S1)
+ * @lattice/engine — CDP adapter layer.
+ *
+ * Public API: types + factory functions.
+ * Implementation: PlaywrightEngineAdapter (wraps playwright-core).
  */
 
-export type BrowserContextId = string & { readonly __brand: "BrowserContextId" };
-export type TargetId = string & { readonly __brand: "TargetId" };
+export type {
+  BrowserContextId,
+  CDPHandle,
+  ContextHandle,
+  EngineAdapter,
+  EngineConfig,
+  NavigationResult,
+  TargetId,
+} from "./types.js";
 
-export interface EngineConfig {
-  headless: boolean;
-  executablePath?: string;
-}
+export { PlaywrightEngineAdapter } from "./adapter.js";
+export { detectChromiumExecutable } from "./executable.js";
 
-export interface BrowserContext {
-  readonly id: BrowserContextId;
-  close(): Promise<void>;
-}
-
-export interface EngineAdapter {
-  launch(config: EngineConfig): Promise<void>;
-  createContext(): Promise<BrowserContext>;
-  shutdown(): Promise<void>;
-}
+import { PlaywrightEngineAdapter } from "./adapter.js";
+import type { EngineAdapter } from "./types.js";
 
 export function createEngineAdapter(): EngineAdapter {
-  throw new Error("Not implemented — see S1");
+  return new PlaywrightEngineAdapter();
 }
