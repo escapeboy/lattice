@@ -9,6 +9,7 @@
     { "path": "./packages/kernel" },
     { "path": "./packages/gateway" },
     { "path": "./packages/sdk-ts" },
-    { "path": "./apps/control-plane" }
+    { "path": "./apps/control-plane" },
+    { "path": "./apps/demo" }
   ]
 }

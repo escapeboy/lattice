@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "composite": true
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../packages/action" },
+    { "path": "../../packages/engine" },
+    { "path": "../../packages/observability" },
+    { "path": "../../packages/perception" }
+  ]
+}

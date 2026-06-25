@@ -1,0 +1,32 @@
+{
+  "name": "@lattice/demo",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "bin": {
+    "lattice-demo": "./dist/main.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "demo": "node dist/main.js"
+  },
+  "dependencies": {
+    "@lattice/action": "workspace:*",
+    "@lattice/engine": "workspace:*",
+    "@lattice/observability": "workspace:*",
+    "@lattice/perception": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
