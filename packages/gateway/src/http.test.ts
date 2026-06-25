@@ -70,11 +70,11 @@ describe("Gateway — Streamable HTTP transport (S10)", () => {
       const { tools } = await client.listTools();
       const names = tools.map((t) => t.name);
 
-      expect(names).toContain("session.create");
-      expect(names).toContain("perceive.snapshot");
-      expect(names).toContain("act.execute");
-      expect(names).toContain("extract.query");
-      expect(names).toContain("vault.autofill");
+      expect(names).toContain("session_create");
+      expect(names).toContain("perceive_snapshot");
+      expect(names).toContain("act_execute");
+      expect(names).toContain("extract_query");
+      expect(names).toContain("vault_autofill");
     } finally {
       await client.close();
     }
@@ -147,17 +147,17 @@ describeIfBrowser("Gateway — external agent end-to-end over HTTP (S10)", () =>
     const client = await connectClient(mcpUrl);
     try {
       const { sessionId } = JSON.parse(
-        toolText(await client.callTool({ name: "session.create", arguments: {} })),
+        toolText(await client.callTool({ name: "session_create", arguments: {} })),
       ) as { sessionId: string };
       expect(typeof sessionId).toBe("string");
 
       await client.callTool({
-        name: "act.execute",
+        name: "act_execute",
         arguments: { sessionId, command: { type: "navigate", url: fixtureUrl } },
       });
 
       const snap = JSON.parse(toolText(await client.callTool({
-        name: "perceive.snapshot",
+        name: "perceive_snapshot",
         arguments: { sessionId, tier: "L1" },
       }))) as { tier: string; nodeCount: number; nodes: Array<{ id: string; label: string }> };
       expect(snap.tier).toBe("L1");
@@ -167,18 +167,18 @@ describeIfBrowser("Gateway — external agent end-to-end over HTTP (S10)", () =>
       expect(usernameNode).toBeDefined();
 
       await client.callTool({
-        name: "act.execute",
+        name: "act_execute",
         arguments: { sessionId, command: { type: "fill", target: { nodeId: usernameNode!.id }, value: "alice" } },
       });
 
       const extracted = JSON.parse(toolText(await client.callTool({
-        name: "extract.query",
+        name: "extract_query",
         arguments: { sessionId, query: "value:#username" },
       }))) as { result: string };
       expect(extracted.result).toBe("alice");
 
       const destroyed = JSON.parse(toolText(await client.callTool({
-        name: "session.destroy",
+        name: "session_destroy",
         arguments: { sessionId },
       }))) as Record<string, unknown>;
       expect(destroyed).toMatchObject({ destroyed: true });

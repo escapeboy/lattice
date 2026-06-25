@@ -30,7 +30,7 @@ import { Vault } from "./vault.js";
 
 const TOOLS = [
   {
-    name: "session.create",
+    name: "session_create",
     description: "Create an isolated browser session context",
     inputSchema: {
       type: "object" as const,
@@ -40,7 +40,7 @@ const TOOLS = [
     },
   },
   {
-    name: "session.destroy",
+    name: "session_destroy",
     description: "Destroy a session and release all resources",
     inputSchema: {
       type: "object" as const,
@@ -49,12 +49,12 @@ const TOOLS = [
     },
   },
   {
-    name: "session.list",
+    name: "session_list",
     description: "List active session IDs",
     inputSchema: { type: "object" as const, properties: {} },
   },
   {
-    name: "perceive.snapshot",
+    name: "perceive_snapshot",
     description: "Get Interaction Graph snapshot of the current page (L0=summary, L1=default IG, L2=with geometry)",
     inputSchema: {
       type: "object" as const,
@@ -66,7 +66,7 @@ const TOOLS = [
     },
   },
   {
-    name: "perceive.delta",
+    name: "perceive_delta",
     description: "Get delta (added/removed/updated nodes) since the last snapshot call on this session",
     inputSchema: {
       type: "object" as const,
@@ -75,7 +75,7 @@ const TOOLS = [
     },
   },
   {
-    name: "act.execute",
+    name: "act_execute",
     description: "Execute a semantic action on the page (navigate/act/fill/select/submit/scroll_to/wait_for)",
     inputSchema: {
       type: "object" as const,
@@ -98,7 +98,7 @@ const TOOLS = [
     },
   },
   {
-    name: "extract.query",
+    name: "extract_query",
     description: "Extract data from the page. Prefix: text:<css>, attr:<css>@<attr>, value:<css>, or bare JS expression",
     inputSchema: {
       type: "object" as const,
@@ -110,7 +110,7 @@ const TOOLS = [
     },
   },
   {
-    name: "capability.check",
+    name: "capability_check",
     description: "Check whether the current page exposes native MCP/WebMCP capabilities",
     inputSchema: {
       type: "object" as const,
@@ -119,7 +119,7 @@ const TOOLS = [
     },
   },
   {
-    name: "vault.store",
+    name: "vault_store",
     description: "Store a credential in the vault. Returns an ID — the secret value is never returned again.",
     inputSchema: {
       type: "object" as const,
@@ -133,12 +133,12 @@ const TOOLS = [
     },
   },
   {
-    name: "vault.list",
+    name: "vault_list",
     description: "List stored credentials (id, label, origin, username — no passwords)",
     inputSchema: { type: "object" as const, properties: {} },
   },
   {
-    name: "vault.autofill",
+    name: "vault_autofill",
     description: "Fill username+password fields using a vault credential. The password value never appears in any response.",
     inputSchema: {
       type: "object" as const,
@@ -152,7 +152,7 @@ const TOOLS = [
     },
   },
   {
-    name: "policy.classify",
+    name: "policy_classify",
     description: "Classify an action type as read/benign/consequential/prohibited",
     inputSchema: {
       type: "object" as const,
@@ -228,23 +228,23 @@ export class GatewayServer {
   ): Promise<ReturnType<typeof ok>> {
     switch (name) {
       // ── session.* ──────────────────────────────────────────────────────────
-      case "session.create": {
+      case "session_create": {
         const topology = (a["topology"] as "ephemeral" | "persistent" | undefined) ?? "ephemeral";
         const session = await this.sessions.create(topology);
         return ok({ sessionId: session.id, topology });
       }
 
-      case "session.destroy": {
+      case "session_destroy": {
         await this.sessions.destroy(a["sessionId"] as string);
         return ok({ destroyed: true });
       }
 
-      case "session.list": {
+      case "session_list": {
         return ok({ sessions: this.sessions.list() });
       }
 
       // ── perceive.* ─────────────────────────────────────────────────────────
-      case "perceive.snapshot": {
+      case "perceive_snapshot": {
         const session = this.getSession(a["sessionId"] as string);
         const tier = ((a["tier"] as string | undefined) ?? "L1") as FidelityTier;
         const snap = await session.perception.snapshot(tier);
@@ -276,7 +276,7 @@ export class GatewayServer {
         });
       }
 
-      case "perceive.delta": {
+      case "perceive_delta": {
         const session = this.getSession(a["sessionId"] as string);
         if (!session.lastSnapshot) return ok({ delta: null, reason: "no prior snapshot" });
 
@@ -288,7 +288,7 @@ export class GatewayServer {
       }
 
       // ── act.* ──────────────────────────────────────────────────────────────
-      case "act.execute": {
+      case "act_execute": {
         const session = this.getSession(a["sessionId"] as string);
         const command = a["command"] as Parameters<typeof session.action.execute>[0];
         session.recorder.recordAction(command);
@@ -309,7 +309,7 @@ export class GatewayServer {
       }
 
       // ── extract.* ──────────────────────────────────────────────────────────
-      case "extract.query": {
+      case "extract_query": {
         const session = this.getSession(a["sessionId"] as string);
         const query = a["query"] as string;
         session.recorder.recordAction({ type: "extract", query });
@@ -319,7 +319,7 @@ export class GatewayServer {
       }
 
       // ── capability.* ───────────────────────────────────────────────────────
-      case "capability.check": {
+      case "capability_check": {
         const session = this.getSession(a["sessionId"] as string);
         const res = await session.context.cdp().send<{ result: { value: boolean } }>(
           "Runtime.evaluate",
@@ -332,7 +332,7 @@ export class GatewayServer {
       }
 
       // ── vault.* ────────────────────────────────────────────────────────────
-      case "vault.store": {
+      case "vault_store": {
         const result = this.vault.store(
           a["label"] as string,
           a["origin"] as string,
@@ -342,11 +342,11 @@ export class GatewayServer {
         return ok({ credentialId: result.id, note: "password stored — never returned via API" });
       }
 
-      case "vault.list": {
+      case "vault_list": {
         return ok({ credentials: this.vault.listPublic() });
       }
 
-      case "vault.autofill": {
+      case "vault_autofill": {
         const session = this.getSession(a["sessionId"] as string);
         const credId = a["credentialId"] as string;
 
@@ -378,7 +378,7 @@ export class GatewayServer {
       }
 
       // ── policy.* ───────────────────────────────────────────────────────────
-      case "policy.classify": {
+      case "policy_classify": {
         // Gateway doesn't hold kernel reference directly; return a static read
         return ok({
           actionType: a["actionType"],

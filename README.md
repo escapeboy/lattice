@@ -76,7 +76,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 const client = new Client({ name: "my-agent", version: "1.0.0" });
 await client.connect(new StreamableHTTPClientTransport(new URL("http://localhost:8765/mcp")));
 
-const { content } = await client.callTool({ name: "session.create", arguments: { topology: "ephemeral" } });
+const { content } = await client.callTool({ name: "session_create", arguments: { topology: "ephemeral" } });
 // → { sessionId }  — thread this sessionId through perceive.* / act.* / extract.*
 ```
 
@@ -97,22 +97,22 @@ Headless Chromium needs a large `/dev/shm`; the compose file sets `shm_size: 1gb
 ## MCP tool reference
 
 All tools return MCP `text` content containing JSON. Browser sessions are
-application-level: `session.create` returns a `sessionId` you pass to the rest.
+application-level: `session_create` returns a `sessionId` you pass to the rest.
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `session.create` | `topology?: "ephemeral"\|"persistent"` | `{ sessionId }` |
-| `session.destroy` | `sessionId` | `{ destroyed }` |
-| `session.list` | — | `{ sessions: string[] }` |
-| `perceive.snapshot` | `sessionId`, `tier?: "L0"\|"L1"\|"L2"` | Interaction Graph (+ delta vs previous snapshot) |
-| `perceive.delta` | `sessionId` | `{ delta, url }` since the last snapshot |
-| `act.execute` | `sessionId`, `command: ActionCommand` | `{ success, url, delta, extracted? }` |
-| `extract.query` | `sessionId`, `query` | extracted page data |
-| `capability.check` | `sessionId` | page MCP-capability probe |
-| `vault.store` | `label`, `origin`, `username`, `password` | `{ id }` (password never echoed) |
-| `vault.list` | — | credentials **without** passwords |
-| `vault.autofill` | `sessionId`, `id`, field targets | fills fields directly; **values never pass through the model** |
-| `policy.classify` | `actionType` | policy classification reference |
+| `session_create` | `topology?: "ephemeral"\|"persistent"` | `{ sessionId }` |
+| `session_destroy` | `sessionId` | `{ destroyed }` |
+| `session_list` | — | `{ sessions: string[] }` |
+| `perceive_snapshot` | `sessionId`, `tier?: "L0"\|"L1"\|"L2"` | Interaction Graph (+ delta vs previous snapshot) |
+| `perceive_delta` | `sessionId` | `{ delta, url }` since the last snapshot |
+| `act_execute` | `sessionId`, `command: ActionCommand` | `{ success, url, delta, extracted? }` |
+| `extract_query` | `sessionId`, `query` | extracted page data |
+| `capability_check` | `sessionId` | page MCP-capability probe |
+| `vault_store` | `label`, `origin`, `username`, `password` | `{ id }` (password never echoed) |
+| `vault_list` | — | credentials **without** passwords |
+| `vault_autofill` | `sessionId`, `id`, field targets | fills fields directly; **values never pass through the model** |
+| `policy_classify` | `actionType` | policy classification reference |
 
 `ActionCommand` (from `@lattice/action`): `{ type: "navigate", url }`,
 `{ type: "act"\|"fill"\|"select"\|"submit"\|"scroll_to", target: { nodeId }, value? }`,

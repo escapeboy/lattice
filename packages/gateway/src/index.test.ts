@@ -80,18 +80,18 @@ describe("GatewayServer — MCP tool listing", () => {
     const { tools } = await client.listTools();
     const names = tools.map((t) => t.name);
 
-    expect(names).toContain("session.create");
-    expect(names).toContain("session.destroy");
-    expect(names).toContain("session.list");
-    expect(names).toContain("perceive.snapshot");
-    expect(names).toContain("perceive.delta");
-    expect(names).toContain("act.execute");
-    expect(names).toContain("extract.query");
-    expect(names).toContain("capability.check");
-    expect(names).toContain("vault.store");
-    expect(names).toContain("vault.list");
-    expect(names).toContain("vault.autofill");
-    expect(names).toContain("policy.classify");
+    expect(names).toContain("session_create");
+    expect(names).toContain("session_destroy");
+    expect(names).toContain("session_list");
+    expect(names).toContain("perceive_snapshot");
+    expect(names).toContain("perceive_delta");
+    expect(names).toContain("act_execute");
+    expect(names).toContain("extract_query");
+    expect(names).toContain("capability_check");
+    expect(names).toContain("vault_store");
+    expect(names).toContain("vault_list");
+    expect(names).toContain("vault_autofill");
+    expect(names).toContain("policy_classify");
 
     await client.close();
     await gateway.stop();
@@ -101,7 +101,7 @@ describe("GatewayServer — MCP tool listing", () => {
     const { client, gateway } = await buildInProcessClient();
 
     const storeRes = await client.callTool({
-      name: "vault.store",
+      name: "vault_store",
       arguments: {
         label: "My Bank",
         origin: "https://bank.com",
@@ -115,7 +115,7 @@ describe("GatewayServer — MCP tool listing", () => {
     // Password must NOT appear in the store response
     expect(storeText).not.toContain("TopSecret123");
 
-    const listRes = await client.callTool({ name: "vault.list", arguments: {} });
+    const listRes = await client.callTool({ name: "vault_list", arguments: {} });
     const listText = toolText(listRes);
     // Password must NOT appear in the list response either
     expect(listText).not.toContain("TopSecret123");
@@ -209,18 +209,18 @@ describeIfBrowser("GatewayServer — browser integration", () => {
 
   it("full perceive→act→extract cycle via MCP", async () => {
     // 1. Create session
-    const { sessionId } = JSON.parse(toolText(await client.callTool({ name: "session.create", arguments: {} }))) as { sessionId: string };
+    const { sessionId } = JSON.parse(toolText(await client.callTool({ name: "session_create", arguments: {} }))) as { sessionId: string };
     expect(typeof sessionId).toBe("string");
 
     // 2. Navigate
     await client.callTool({
-      name: "act.execute",
+      name: "act_execute",
       arguments: { sessionId, command: { type: "navigate", url: serverUrl } },
     });
 
     // 3. Perceive snapshot
     const snap = JSON.parse(toolText(await client.callTool({
-      name: "perceive.snapshot",
+      name: "perceive_snapshot",
       arguments: { sessionId, tier: "L1" },
     }))) as { tier: string; nodeCount: number; nodes: Array<{ id: string; role: string; label: string }> };
     expect(snap.tier).toBe("L1");
@@ -232,7 +232,7 @@ describeIfBrowser("GatewayServer — browser integration", () => {
 
     // 4. Fill username
     await client.callTool({
-      name: "act.execute",
+      name: "act_execute",
       arguments: {
         sessionId,
         command: { type: "fill", target: { nodeId: usernameNode!.id }, value: "alice" },
@@ -241,33 +241,33 @@ describeIfBrowser("GatewayServer — browser integration", () => {
 
     // 5. Extract username field value
     const extracted = JSON.parse(toolText(await client.callTool({
-      name: "extract.query",
+      name: "extract_query",
       arguments: { sessionId, query: "value:#username" },
     }))) as { result: string };
     expect(extracted.result).toBe("alice");
 
     // 6. Destroy session
     const destroyed = JSON.parse(toolText(await client.callTool({
-      name: "session.destroy",
+      name: "session_destroy",
       arguments: { sessionId },
     }))) as Record<string, unknown>;
     expect(destroyed).toMatchObject({ destroyed: true });
   });
 
   it("perceive.delta returns changes after DOM mutation", async () => {
-    const { sessionId } = JSON.parse(toolText(await client.callTool({ name: "session.create", arguments: {} }))) as { sessionId: string };
+    const { sessionId } = JSON.parse(toolText(await client.callTool({ name: "session_create", arguments: {} }))) as { sessionId: string };
 
     await client.callTool({
-      name: "act.execute",
+      name: "act_execute",
       arguments: { sessionId, command: { type: "navigate", url: serverUrl } },
     });
 
     // First snapshot (establishes baseline)
-    await client.callTool({ name: "perceive.snapshot", arguments: { sessionId, tier: "L1" } });
+    await client.callTool({ name: "perceive_snapshot", arguments: { sessionId, tier: "L1" } });
 
     // Mutate DOM — fill the input, which changes its value
     await client.callTool({
-      name: "act.execute",
+      name: "act_execute",
       arguments: {
         sessionId,
         command: { type: "fill", target: { nodeId: "placeholder" }, value: "test" },
@@ -276,26 +276,26 @@ describeIfBrowser("GatewayServer — browser integration", () => {
 
     // Delta
     const deltaText = toolText(await client.callTool({
-      name: "perceive.delta",
+      name: "perceive_delta",
       arguments: { sessionId },
     }));
     const deltaObj = JSON.parse(deltaText) as { delta: unknown; url: string };
     expect(deltaObj).toHaveProperty("url");
     expect(deltaText).toBeTruthy();
 
-    await client.callTool({ name: "session.destroy", arguments: { sessionId } });
+    await client.callTool({ name: "session_destroy", arguments: { sessionId } });
   });
 
   it("vault.autofill — fills fields without exposing password value in any response", async () => {
-    const { sessionId } = JSON.parse(toolText(await client.callTool({ name: "session.create", arguments: {} }))) as { sessionId: string };
+    const { sessionId } = JSON.parse(toolText(await client.callTool({ name: "session_create", arguments: {} }))) as { sessionId: string };
 
     await client.callTool({
-      name: "act.execute",
+      name: "act_execute",
       arguments: { sessionId, command: { type: "navigate", url: serverUrl } },
     });
 
     // Discover nodes
-    const snap = JSON.parse(toolText(await client.callTool({ name: "perceive.snapshot", arguments: { sessionId, tier: "L1" } }))) as { nodes: Array<{ id: string; label: string }> };
+    const snap = JSON.parse(toolText(await client.callTool({ name: "perceive_snapshot", arguments: { sessionId, tier: "L1" } }))) as { nodes: Array<{ id: string; label: string }> };
     const usernameNode = snap.nodes.find((n) => n.label?.toLowerCase().includes("username"));
     const passwordNode = snap.nodes.find((n) => n.label?.toLowerCase().includes("password"));
     expect(usernameNode).toBeDefined();
@@ -303,7 +303,7 @@ describeIfBrowser("GatewayServer — browser integration", () => {
 
     // Store credential
     const storeText = toolText(await client.callTool({
-      name: "vault.store",
+      name: "vault_store",
       arguments: { label: "Test Login", origin: serverUrl, username: "bob", password: "hunter2" },
     }));
     const { credentialId } = JSON.parse(storeText) as { credentialId: string };
@@ -312,7 +312,7 @@ describeIfBrowser("GatewayServer — browser integration", () => {
 
     // Autofill
     const fillRes = await client.callTool({
-      name: "vault.autofill",
+      name: "vault_autofill",
       arguments: {
         sessionId,
         credentialId,
@@ -328,23 +328,23 @@ describeIfBrowser("GatewayServer — browser integration", () => {
 
     // Username field should be filled
     const { result } = JSON.parse(toolText(await client.callTool({
-      name: "extract.query",
+      name: "extract_query",
       arguments: { sessionId, query: "value:#username" },
     }))) as { result: string };
     expect(result).toBe("bob");
 
-    await client.callTool({ name: "session.destroy", arguments: { sessionId } });
+    await client.callTool({ name: "session_destroy", arguments: { sessionId } });
   });
 
   it("session.list shows active sessions", async () => {
-    const { sessionId: s1id } = JSON.parse(toolText(await client.callTool({ name: "session.create", arguments: {} }))) as { sessionId: string };
-    const { sessionId: s2id } = JSON.parse(toolText(await client.callTool({ name: "session.create", arguments: {} }))) as { sessionId: string };
+    const { sessionId: s1id } = JSON.parse(toolText(await client.callTool({ name: "session_create", arguments: {} }))) as { sessionId: string };
+    const { sessionId: s2id } = JSON.parse(toolText(await client.callTool({ name: "session_create", arguments: {} }))) as { sessionId: string };
 
-    const { sessions } = JSON.parse(toolText(await client.callTool({ name: "session.list", arguments: {} }))) as { sessions: string[] };
+    const { sessions } = JSON.parse(toolText(await client.callTool({ name: "session_list", arguments: {} }))) as { sessions: string[] };
     expect(sessions).toContain(s1id);
     expect(sessions).toContain(s2id);
 
-    await client.callTool({ name: "session.destroy", arguments: { sessionId: s1id } });
-    await client.callTool({ name: "session.destroy", arguments: { sessionId: s2id } });
+    await client.callTool({ name: "session_destroy", arguments: { sessionId: s1id } });
+    await client.callTool({ name: "session_destroy", arguments: { sessionId: s2id } });
   });
 });
