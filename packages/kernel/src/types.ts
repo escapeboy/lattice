@@ -102,6 +102,10 @@ export interface SecurityKernel {
   checkEgress(req: EgressRequest): boolean;
   /** Wrap page content in TaintedStr — it must never escape the quarantined channel. */
   taintContent(raw: string): TaintedStr;
+  /** Register every string leaf of a value as tainted (page-origin observation). */
+  taintTree(value: unknown): void;
+  /** Apply an approved policy patch to live enforcement; floor re-asserted. */
+  applyPolicy(patch: { allowedOrigins?: string[]; egressAllowlist?: string[]; prohibitedActions?: string[] }): void;
   /** Classify an operator-surface tool into its privilege tier. */
   operatorTier(tool: string): OperatorTier;
   /**

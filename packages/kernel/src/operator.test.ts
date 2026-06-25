@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { createSecurityKernel } from "./index.js";
 import { CONSTITUTIONAL_FLOOR, violatesFloor } from "./operator.js";
 import type { KernelConfig } from "./index.js";
@@ -164,6 +164,55 @@ describe("@lattice/kernel — injection→operator structural block", () => {
     const d = k.authorizeOperator({ tool: "budget_set", args: { limit: 50 }, sessionId: "s1", grant, origin: "agent" });
     expect(d.taintedOrigin).toBe(false);
     expect(d.allowed).toBe(true);
+  });
+});
+
+describe("@lattice/kernel — taint leaf granularity (hardening)", () => {
+  it("registerTaintTree taints individual leaves, not just the serialized whole", () => {
+    const k = createSecurityKernel(config);
+    // Simulates session_observe handing the agent individual node values.
+    k.taintTree({ url: "https://app", nodes: [{ label: "Sign In", href: "https://attacker.example" }] });
+    // Agent extracts a single leaf and forwards it to an operator write.
+    const d = k.authorizeOperator({
+      tool: "policy_set",
+      args: { egressAllowlist: ["https://attacker.example"] },
+      sessionId: "s1",
+      origin: "agent",
+    });
+    expect(d.taintedOrigin).toBe(true);
+  });
+});
+
+describe("@lattice/kernel — grant TTL (hardening)", () => {
+  it("an expired grant is not redeemable", () => {
+    vi.useFakeTimers();
+    try {
+      const k = createSecurityKernel(config);
+      const grant = k.mintHumanGrant({ tool: "budget_set", sessionId: "s1" });
+      vi.advanceTimersByTime(11 * 60_000); // past the 10-minute TTL
+      const d = k.authorizeOperator({ tool: "budget_set", args: {}, sessionId: "s1", grant, origin: "agent" });
+      expect(d.allowed).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("@lattice/kernel — applyPolicy live enforcement (hardening)", () => {
+  it("applyPolicy changes checkEgress and classify, and re-asserts the floor", () => {
+    const k = createSecurityKernel({ ...config, egressAllowlist: [], prohibitedActions: [] });
+    // Before: a destination is blocked.
+    expect(k.checkEgress({ destination: "https://api.partner.com/x", sourceOrigin: "https://app.example.com", taskOrigin: "https://app.example.com", sessionId: "s1" })).toBe(false);
+
+    // A human-approved policy_set widens the egress allowlist AND tries to drop
+    // the floor by supplying a short prohibited list.
+    k.applyPolicy({ egressAllowlist: ["https://api.partner.com"], prohibitedActions: ["custom.block"] });
+
+    // After: the destination is now allowed (live enforcement changed).
+    expect(k.checkEgress({ destination: "https://api.partner.com/x", sourceOrigin: "https://app.example.com", taskOrigin: "https://app.example.com", sessionId: "s1" })).toBe(true);
+    // But the floor was re-asserted — payment stays prohibited.
+    expect(k.classify({ actionType: "payment", origin: "x", sessionId: "s1", payload: null })).toBe("prohibited");
+    expect(k.classify({ actionType: "custom.block", origin: "x", sessionId: "s1", payload: null })).toBe("prohibited");
   });
 });
 

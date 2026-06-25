@@ -10,6 +10,7 @@
  */
 
 import { randomUUID } from "node:crypto";
+import { CONSTITUTIONAL_FLOOR } from "@lattice/kernel";
 
 export interface PersonaRecord {
   readonly id: string;
@@ -71,10 +72,15 @@ export class OperatorStore {
 
   /** Apply a policy patch. Caller MUST have passed the kernel floor+grant gate. */
   setPolicy(patch: Partial<PolicySnapshot>): PolicySnapshot {
+    const nextProhibited = patch.prohibitedActions ?? this.policy.prohibitedActions;
+    // Defense-in-depth: the floor primitives are unioned in unconditionally, so
+    // the stored snapshot can never drop below the floor even if the gate were
+    // bypassed. The gate is the primary guard; this is the belt-and-braces.
+    const floored = Array.from(new Set([...nextProhibited, ...CONSTITUTIONAL_FLOOR.prohibitedPrimitives]));
     this.policy = {
       allowedOrigins: patch.allowedOrigins ?? this.policy.allowedOrigins,
       egressAllowlist: patch.egressAllowlist ?? this.policy.egressAllowlist,
-      prohibitedActions: patch.prohibitedActions ?? this.policy.prohibitedActions,
+      prohibitedActions: floored,
       requireGrant: patch.requireGrant ?? this.policy.requireGrant,
       taintingEnabled: true,
       egressFromContentAllowed: false,

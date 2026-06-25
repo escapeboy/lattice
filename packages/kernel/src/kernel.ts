@@ -13,7 +13,7 @@
 
 import { randomUUID } from "node:crypto";
 import { taint } from "./types.js";
-import { OperatorGate } from "./operator.js";
+import { CONSTITUTIONAL_FLOOR, OperatorGate } from "./operator.js";
 import type {
   AuditEvent,
   CapabilityRequest,
@@ -206,8 +206,34 @@ export class SecurityKernelImpl implements SecurityKernel {
     return taint(raw);
   }
 
+  taintTree(value: unknown): void {
+    this.operator.registerTaintTree(value);
+  }
+
   operatorTier(tool: string): OperatorTier {
     return this.operator.tier(tool);
+  }
+
+  /**
+   * Apply an approved policy patch to the LIVE enforcement config (egress
+   * allowlist, prohibited actions, origin scope) so policy_set actually changes
+   * checkEgress/classify — not just a UI snapshot. Defense-in-depth: the floor
+   * primitives are unioned back in unconditionally, so the live prohibited set
+   * can never drop below the floor even if a caller bypassed the gate.
+   */
+  applyPolicy(patch: { allowedOrigins?: string[]; egressAllowlist?: string[]; prohibitedActions?: string[] }): void {
+    if (patch.allowedOrigins) replaceInPlace(this.config.allowedOrigins, patch.allowedOrigins);
+    if (patch.egressAllowlist) replaceInPlace(this.config.egressAllowlist, patch.egressAllowlist);
+    const nextProhibited = patch.prohibitedActions ?? this.config.prohibitedActions;
+    const floored = new Set([...nextProhibited, ...CONSTITUTIONAL_FLOOR.prohibitedPrimitives]);
+    replaceInPlace(this.config.prohibitedActions, Array.from(floored));
+    this.emit({
+      kind: "policy",
+      origin: "control-plane",
+      sessionId: "operator",
+      detail: "policy applied to live enforcement (floor re-asserted)",
+      granted: true,
+    });
   }
 
   mintHumanGrant(scope: GrantScope): string {
@@ -239,4 +265,10 @@ export class SecurityKernelImpl implements SecurityKernel {
   private emit(event: Omit<AuditEvent, "ts">): void {
     this.log.push({ ts: Date.now(), ...event });
   }
+}
+
+/** Replace an array's contents in place (config arrays are shared references). */
+function replaceInPlace(target: string[], next: string[]): void {
+  target.length = 0;
+  target.push(...next);
 }

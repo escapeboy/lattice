@@ -661,8 +661,12 @@ export class GatewayServer {
         const session = this.getSession(a["sessionId"] as string);
         const snap = (await session.perception.snapshot("L1")) as InteractionGraph;
         const nodes = Array.from(snap.nodes.values());
-        const observation = JSON.stringify({ url: snap.url, title: snap.title, nodes });
-        this.kernel.taintContent(observation);
+        const observation = { url: snap.url, title: snap.title, nodes };
+        // Taint at LEAF granularity: the agent receives individual node values,
+        // so each one — not just the serialized blob — must be tainted, or it
+        // could extract a leaf and pass it to an operator write.
+        this.kernel.taintTree(observation);
+        this.kernel.taintContent(JSON.stringify(observation));
         this.auditOperatorRead("session_observe");
         return ok({
           channel: "quarantine",
@@ -777,7 +781,15 @@ export class GatewayServer {
         if (Array.isArray(a["egressAllowlist"])) patch.egressAllowlist = a["egressAllowlist"] as string[];
         if (Array.isArray(a["prohibitedActions"])) patch.prohibitedActions = a["prohibitedActions"] as string[];
         if (Array.isArray(a["requireGrant"])) patch.requireGrant = a["requireGrant"] as string[];
-        return ok({ status: "applied", policy: this.operatorStore.setPolicy(patch) });
+        // Apply to BOTH the UI snapshot and the live kernel enforcement, so a
+        // tightened policy actually changes checkEgress/classify — not cosmetic.
+        const applied = this.operatorStore.setPolicy(patch);
+        this.kernel.applyPolicy({
+          ...(patch.allowedOrigins ? { allowedOrigins: patch.allowedOrigins } : {}),
+          ...(patch.egressAllowlist ? { egressAllowlist: patch.egressAllowlist } : {}),
+          prohibitedActions: applied.prohibitedActions,
+        });
+        return ok({ status: "applied", policy: applied });
       }
       case "persona_create": {
         const rec = this.operatorStore.createPersona(

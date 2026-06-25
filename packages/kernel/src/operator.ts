@@ -92,10 +92,12 @@ function stringLeaves(value: unknown, out: string[]): void {
 export class OperatorGate {
   /** Hashes of content that has been tainted (page-origin). */
   private readonly taintedHashes = new Set<string>();
-  /** Live single-use grant tokens → the scope they authorize. */
-  private readonly grants = new Map<string, GrantScope>();
+  /** Live single-use grant tokens → scope + expiry. */
+  private readonly grants = new Map<string, { scope: GrantScope; expiresAt: number }>();
   /** Cap the taint registry so a long-running gateway can't grow unbounded. */
   private readonly maxTainted = 50_000;
+  /** Grants expire — bounds the replay window beyond single-use. */
+  private readonly grantTtlMs = 10 * 60_000;
 
   /** Register a string as tainted (page-origin). Called by kernel.taintContent. */
   registerTaint(raw: string): void {
@@ -105,6 +107,18 @@ export class OperatorGate {
       if (first !== undefined) this.taintedHashes.delete(first);
     }
     this.taintedHashes.add(hashContent(raw));
+  }
+
+  /**
+   * Register every string leaf of a value as tainted. session_observe hands the
+   * agent individual node values, not just the serialized blob — so we taint at
+   * the granularity the agent actually forwards, closing the "extract one leaf
+   * and pass it to an operator tool" bypass.
+   */
+  registerTaintTree(value: unknown): void {
+    const leaves: string[] = [];
+    stringLeaves(value, leaves);
+    for (const s of leaves) this.registerTaint(s);
   }
 
   tier(tool: string): OperatorTier {
@@ -117,7 +131,7 @@ export class OperatorGate {
 
   mintGrant(scope: GrantScope): string {
     const token = randomUUID();
-    this.grants.set(token, scope);
+    this.grants.set(token, { scope, expiresAt: Date.now() + this.grantTtlMs });
     return token;
   }
 
@@ -210,9 +224,13 @@ export class OperatorGate {
   }
 
   private consumeGrant(token: string, tool: string, sessionId: string): boolean {
-    const scope = this.grants.get(token);
-    if (!scope) return false;
-    if (scope.tool !== tool || scope.sessionId !== sessionId) return false;
+    const entry = this.grants.get(token);
+    if (!entry) return false;
+    if (Date.now() > entry.expiresAt) {
+      this.grants.delete(token); // expired — not redeemable
+      return false;
+    }
+    if (entry.scope.tool !== tool || entry.scope.sessionId !== sessionId) return false;
     this.grants.delete(token); // single use
     return true;
   }

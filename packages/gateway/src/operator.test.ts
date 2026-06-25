@@ -185,3 +185,42 @@ describe("operator surface — NEGATIVE: write without human grant", () => {
     await gateway.stop();
   });
 });
+
+// ── Hardening (from adversarial review) ──────────────────────────────────────
+
+describe("operator surface — hardening: a leaf of a tainted observation is blocked", () => {
+  it("a value the kernel tainted at leaf granularity cannot be forwarded to an operator write", async () => {
+    const { client, gateway, kernel } = await build();
+    // session_observe taints each leaf; emulate that the agent saw this node value.
+    kernel.taintTree({ nodes: [{ label: "Login", href: "https://attacker.example" }] });
+    const grant = gateway.mintOperatorGrant({ tool: "policy_set", sessionId: "operator" });
+    // Agent extracts the single leaf value and forwards it — must be blocked.
+    const res = toolJson(await client.callTool({
+      name: "policy_set",
+      arguments: { grant, egressAllowlist: ["https://attacker.example"] },
+    }));
+    expect(res["status"]).toBe("blocked");
+    expect(res["reason"]).toBe("tainted_origin");
+    await client.close();
+    await gateway.stop();
+  });
+});
+
+describe("operator surface — hardening: policy_set is live, not cosmetic", () => {
+  it("an approved policy_set changes live egress enforcement and re-asserts the floor", async () => {
+    const { client, gateway, kernel } = await build();
+    const grant = gateway.mintOperatorGrant({ tool: "policy_set", sessionId: "operator" });
+    // A legitimate tightening: widen the egress allowlist for a partner API.
+    const res = toolJson(await client.callTool({
+      name: "policy_set",
+      arguments: { grant, egressAllowlist: ["https://api.partner.com"] },
+    }));
+    expect(res["status"]).toBe("applied");
+    // Live enforcement changed: the partner origin now passes the egress firewall.
+    expect(kernel.checkEgress({ destination: "https://api.partner.com/v1", sourceOrigin: "https://app", taskOrigin: "https://app", sessionId: "s1" })).toBe(true);
+    // The floor is intact in live classify.
+    expect(kernel.classify({ actionType: "payment", origin: "x", sessionId: "s1", payload: null })).toBe("prohibited");
+    await client.close();
+    await gateway.stop();
+  });
+});
