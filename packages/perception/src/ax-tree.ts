@@ -249,6 +249,20 @@ export async function buildInteractionGraph(
     return parts.join(" ").replace(/\s+/g, " ").trim();
   }
 
+  // True if any descendant maps to a semantic interactive role. Used to drop
+  // inferred wrapper nodes whose real interactive child is already captured.
+  function hasInteractiveDescendant(node: AXNode, depth = 5): boolean {
+    if (depth === 0) return false;
+    for (const cid of node.childIds ?? []) {
+      const child = byId.get(cid);
+      if (!child) continue;
+      const cr = mapRole(child.role?.value as string | undefined);
+      if (cr && INTERACTIVE_ROLES.has(cr)) return true;
+      if (hasInteractiveDescendant(child, depth - 1)) return true;
+    }
+    return false;
+  }
+
   // Ordinal tracker: (role, name) → count
   const ordinalTracker = new Map<string, number>();
 
@@ -272,6 +286,10 @@ export async function buildInteractionGraph(
       // child StaticText nodes), so derive the label from descendant text.
       const actionable = enrich?.clickable === true || enrich?.focusable === true;
       if (!actionable) continue;
+      // A clickable wrapper around a real control is redundant — the child gets
+      // captured with its proper role; emitting the wrapper just adds a noisy,
+      // verbose-label duplicate.
+      if (hasInteractiveDescendant(axNode)) continue;
       if (label === "") label = descendantText(axNode);
       if (label === "" && enrich?.href === undefined) continue; // no usable identity
       role = enrich?.href !== undefined ? "link" : "button";

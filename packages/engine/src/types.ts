@@ -39,6 +39,8 @@ export interface ContextHandle {
   currentUrl(): string;
   /** CDP session for the context's active page (ready after createContext resolves). */
   cdp(): CDPHandle;
+  /** Capture a viewport screenshot of the active page as base64-encoded PNG. */
+  screenshot(): Promise<string>;
   close(): Promise<void>;
 }
 

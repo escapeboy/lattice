@@ -254,6 +254,25 @@ describeIfBrowser("GatewayServer — browser integration", () => {
     expect(destroyed).toMatchObject({ destroyed: true });
   });
 
+  it("perceive_snapshot L3 returns the IG plus a screenshot image", async () => {
+    const { sessionId } = JSON.parse(toolText(await client.callTool({ name: "session_create", arguments: {} }))) as { sessionId: string };
+    await client.callTool({ name: "act_execute", arguments: { sessionId, command: { type: "navigate", url: serverUrl } } });
+
+    const res = await client.callTool({ name: "perceive_snapshot", arguments: { sessionId, tier: "L3" } });
+    const content = (res as { content: Array<{ type: string; text?: string; data?: string; mimeType?: string }> }).content;
+
+    // L3 ships two blocks: the semantic IG (text) and a screenshot (image).
+    expect(content).toHaveLength(2);
+    const text = content.find((c) => c.type === "text");
+    const image = content.find((c) => c.type === "image");
+    expect(text?.text).toContain(`"tier": "L3"`);
+    expect(image).toBeDefined();
+    expect(image!.mimeType).toBe("image/png");
+    expect((image!.data ?? "").length).toBeGreaterThan(100);
+
+    await client.callTool({ name: "session_destroy", arguments: { sessionId } });
+  });
+
   it("perceive.delta returns changes after DOM mutation", async () => {
     const { sessionId } = JSON.parse(toolText(await client.callTool({ name: "session_create", arguments: {} }))) as { sessionId: string };
 

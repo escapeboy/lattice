@@ -82,6 +82,24 @@ describeIfBrowser("@lattice/engine — adapter integration (S1)", () => {
     }
   });
 
+  it("screenshot() returns a non-empty base64 PNG", async () => {
+    const adapter: EngineAdapter = createEngineAdapter();
+    await adapter.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
+
+    try {
+      const ctx = await adapter.createContext();
+      await ctx.navigate(testUrl);
+      const data = await ctx.screenshot();
+      expect(typeof data).toBe("string");
+      expect(data.length).toBeGreaterThan(100);
+      // PNG magic bytes "\x89PNG" → base64 prefix "iVBORw0KGgo".
+      expect(data.startsWith("iVBORw0KGgo")).toBe(true);
+      await ctx.close();
+    } finally {
+      await adapter.shutdown();
+    }
+  });
+
   it("CDP session is ready after createContext()", async () => {
     const adapter: EngineAdapter = createEngineAdapter();
     await adapter.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
