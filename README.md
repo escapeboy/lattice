@@ -34,6 +34,16 @@ floor), **cross-mutation stable identity** (reliability across re-renders), and
 **streamed deltas** over multi-step flows. Those are what the eval harness and the
 governance eval measure; see [`packages/eval`](./packages/eval).
 
+**Governance — measured.** The governance eval (a 20-attack injection/bypass
+corpus, adjudicated by the real kernel + firewall) reports **20/20 at the function
+level** and **18/20 wired on the default deployment**. The one residual class is
+`egress-exfil`: the kernel's egress firewall is implemented but not yet wired to
+the in-browser request path (app-level wiring is planned via network-request
+interception). It is mitigated **at the network/infra layer today** — run the
+gateway behind an outbound allowlist proxy; see [SECURITY.md](./SECURITY.md). The
+default deployment is the firewalled build-on stack; the raw-CDP path is an
+explicit dev-only opt-in (`LATTICE_ENGINE=cdp`).
+
 ## Architecture
 
 A pnpm monorepo of focused packages:

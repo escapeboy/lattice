@@ -94,6 +94,54 @@ See `packages/engine-adapter/src/firewall.test.ts`,
   scope each task to its origins so cross-origin wander is blocked too. (The
   scheme floor above holds either way.)
 
+### Egress firewall — required compensating control (network layer)
+
+The kernel's egress firewall (`checkEgress`, content-provenance aware) is fully
+implemented but **not yet wired to the in-browser request path**: doing so needs
+network-level request interception in the engine (planned — see the governance
+note). Until that lands, the governance eval reports **18/20 wired on the default
+deployment**, with the `egress-exfil` class as the one residual. Close it at the
+infrastructure layer — this is a real, deployable mitigation **today**:
+
+Run the gateway container behind an **outbound (egress) allowlist proxy** so a
+hostile page cannot exfiltrate data to an attacker origin even if it reaches the
+browser. The agent network is default-deny; only the task's origins are allowed
+out.
+
+**Docker — route the gateway's egress through a forward proxy on an internal-only
+network:**
+
+```yaml
+services:
+  lattice:
+    networks: [internal]          # no direct internet
+    environment:
+      HTTPS_PROXY: http://egress-proxy:3128
+      HTTP_PROXY:  http://egress-proxy:3128
+      NO_PROXY:    127.0.0.1,localhost
+  egress-proxy:
+    image: ubuntu/squid
+    networks: [internal, egress]  # the ONLY service with outbound access
+    volumes: [./squid.conf:/etc/squid/squid.conf:ro]
+networks:
+  internal: { internal: true }    # default-deny: no route to the internet
+  egress: {}
+```
+
+```squid
+# squid.conf — default-deny egress allowlist
+acl allowed_dst dstdomain .app.example.com .api.partner.com
+http_access allow allowed_dst
+http_access deny all
+```
+
+Keep the proxy allowlist in sync with `LATTICE_EGRESS_ALLOWLIST`. On a single
+host (Hetzner) the same effect is achievable with nftables/iptables egress rules
+on the container's veth, or a Cilium/NetworkPolicy `egress` allowlist on k8s.
+
+This bounds the residual to the network layer regardless of in-browser wiring;
+the app-level interception (below) is the deeper fix, not a replacement for it.
+
 ## Reporting
 
 This is a research prototype. Report security issues privately to the
