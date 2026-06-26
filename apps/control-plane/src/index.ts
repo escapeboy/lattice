@@ -10,6 +10,7 @@ export { ApprovalInbox } from "./inbox.js";
 export { PolicyEditor } from "./policy.js";
 export { OperatorGrantInbox } from "./operator-grants.js";
 export { buildUI } from "./ui.js";
+export { buildHandoffPage } from "./handoff-page.js";
 export type {
   ApprovalDecision,
   ApprovalOutcome,
@@ -18,3 +19,4 @@ export type {
   SessionView,
 } from "./types.js";
 export type { OperatorGrantOutcome, OperatorGrantRequest } from "./operator-grants.js";
+export type { ControlPlaneBackend, HandoffLike, HandoffView } from "./types.js";

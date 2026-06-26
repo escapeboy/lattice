@@ -10,6 +10,7 @@ import { createActionEngine } from "@lattice/action";
 import type { ActionEngine } from "@lattice/action";
 import type { SecurityKernel } from "@lattice/kernel";
 import { TraceRecorder } from "@lattice/observability";
+import type { SessionTrace } from "@lattice/observability";
 
 export interface GatewaySession {
   readonly id: string;
@@ -56,13 +57,14 @@ export class SessionRegistry {
     return this.sessions.get(id);
   }
 
-  async destroy(id: string): Promise<void> {
+  async destroy(id: string): Promise<SessionTrace | undefined> {
     const session = this.sessions.get(id);
-    if (!session) return;
+    if (!session) return undefined;
     for (const cleanup of session.subscriptions.values()) cleanup();
-    session.recorder.finish(); // finalize trace
+    const trace = session.recorder.finish(); // finalize trace
     this.sessions.delete(id);
     await session.context.close();
+    return trace;
   }
 
   list(): string[] {

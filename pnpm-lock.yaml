@@ -95,6 +95,34 @@ importers:
         specifier: 'catalog:'
         version: 3.2.6(@types/node@22.20.0)
 
+  apps/serve:
+    dependencies:
+      '@lattice/control-plane':
+        specifier: workspace:*
+        version: link:../control-plane
+      '@lattice/engine':
+        specifier: workspace:*
+        version: link:../../packages/engine
+      '@lattice/gateway':
+        specifier: workspace:*
+        version: link:../../packages/gateway
+      '@lattice/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
+    devDependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.29.0
+        version: 1.29.0(zod@4.4.3)
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.20.0
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.6(@types/node@22.20.0)
+
   packages/action:
     dependencies:
       '@lattice/engine':

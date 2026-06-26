@@ -27,6 +27,26 @@ import { SessionRegistry } from "./sessions.js";
 import { Vault } from "./vault.js";
 import { OperatorStore, type DeviceChannel, type PolicySnapshot } from "./operator.js";
 import { HandoffManager, NullTransport, type HandoffType, type NotificationTransport } from "./handoff.js";
+import type { SessionTrace } from "@lattice/observability";
+
+/** A live view of a session, emitted to the control-plane theater. */
+export interface SessionViewEvent {
+  readonly sessionId: string;
+  readonly url: string;
+  readonly actionCount: number;
+  readonly lastSnapshotAt?: number;
+  readonly nodeCount?: number;
+}
+
+/** Hooks the unified `serve` process wires to the control plane. */
+export interface GatewayObserver {
+  /** Session created/updated (theater). `null` view = session removed. */
+  onSession?: (sessionId: string, view: SessionViewEvent | null) => void;
+  /** A completed trace (replay browser + Svod emit). */
+  onTrace?: (trace: SessionTrace) => void;
+  /** An operator write was blocked needing a human grant (approval inbox). */
+  onGrantRequest?: (scope: GrantScope, summary: string) => void;
+}
 
 // ── Tool definitions ─────────────────────────────────────────────────────────
 
@@ -365,6 +385,9 @@ export class GatewayServer {
   private readonly kernel: SecurityKernel;
   private readonly operatorStore: OperatorStore;
   private readonly handoff: HandoffManager;
+  private readonly observer: GatewayObserver;
+  /** Per-session action counter, for the theater view. */
+  private readonly actionCounts = new Map<string, number>();
   private httpServer: HttpServer | null = null;
   /** Live MCP transports keyed by mcp-session-id (one per connected agent). */
   private readonly mcpTransports = new Map<string, StreamableHTTPServerTransport>();
@@ -372,17 +395,41 @@ export class GatewayServer {
   constructor(
     engine: EngineAdapter,
     kernel: SecurityKernel,
-    opts?: { handoffTransport?: NotificationTransport; handoffSigningKey?: string },
+    opts?: {
+      handoffTransport?: NotificationTransport;
+      handoffSigningKey?: string;
+      vault?: Vault;
+      observer?: GatewayObserver;
+    },
   ) {
     this.kernel = kernel;
     this.sessions = new SessionRegistry(engine, kernel);
-    this.vault = new Vault();
+    this.vault = opts?.vault ?? new Vault();
     this.operatorStore = new OperatorStore();
     this.handoff = new HandoffManager(
       opts?.handoffTransport ?? new NullTransport(),
       opts?.handoffSigningKey ?? randomUUID(),
     );
+    this.observer = opts?.observer ?? {};
     this.mcp = this.buildServer();
+  }
+
+  /** Emit a theater view for a session (current url + action count). */
+  private emitSession(sessionId: string, extra?: { nodeCount?: number; lastSnapshotAt?: number }): void {
+    if (!this.observer.onSession) return;
+    const session = this.sessions.get(sessionId);
+    if (!session) { this.observer.onSession(sessionId, null); return; }
+    this.observer.onSession(sessionId, {
+      sessionId,
+      url: session.context.currentUrl(),
+      actionCount: this.actionCounts.get(sessionId) ?? 0,
+      ...(extra?.nodeCount !== undefined ? { nodeCount: extra.nodeCount } : {}),
+      ...(extra?.lastSnapshotAt !== undefined ? { lastSnapshotAt: extra.lastSnapshotAt } : {}),
+    });
+  }
+
+  private bumpAction(sessionId: string): void {
+    this.actionCounts.set(sessionId, (this.actionCounts.get(sessionId) ?? 0) + 1);
   }
 
   /** A fresh MCP Server wired to the shared gateway state (handlers dispatch
@@ -453,11 +500,17 @@ export class GatewayServer {
       case "session_create": {
         const topology = (a["topology"] as "ephemeral" | "persistent" | undefined) ?? "ephemeral";
         const session = await this.sessions.create(topology);
+        this.actionCounts.set(session.id, 0);
+        this.emitSession(session.id);
         return ok({ sessionId: session.id, topology });
       }
 
       case "session_destroy": {
-        await this.sessions.destroy(a["sessionId"] as string);
+        const sessionId = a["sessionId"] as string;
+        const trace = await this.sessions.destroy(sessionId);
+        this.actionCounts.delete(sessionId);
+        if (this.observer.onSession) this.observer.onSession(sessionId, null);
+        if (trace && this.observer.onTrace) this.observer.onTrace(trace);
         return ok({ destroyed: true });
       }
 
@@ -482,6 +535,7 @@ export class GatewayServer {
         session.lastSnapshot = ig;
 
         session.recorder.recordSnapshot(ig.tier, ig.url, ig.title ?? "", nodes);
+        this.emitSession(session.id, { nodeCount: nodes.length, lastSnapshotAt: Date.now() });
         if (prev) {
           const d = session.perception.delta(prev, ig);
           session.recorder.recordDelta(d.added.length, d.removed.length, d.updated.length, ig.url);
@@ -533,9 +587,11 @@ export class GatewayServer {
           return err(`origin_out_of_scope: navigation to ${command.url} is outside the task's allowed origins`);
         }
         session.recorder.recordAction(command);
+        this.bumpAction(session.id);
         try {
           const result = await session.action.execute(command);
           session.recorder.recordActionResult(result.success, result.url, result.extracted);
+          this.emitSession(session.id);
           return ok({
             success: result.success,
             url: result.url,
@@ -789,6 +845,11 @@ export class GatewayServer {
       }
       if (decision.floorViolation) {
         return ok({ status: "blocked", reason: "floor_violation", detail: decision.reason });
+      }
+      // Raise the request to the human channel (approval inbox in the theater).
+      if (this.observer.onGrantRequest) {
+        const sessionId = (a["sessionId"] as string | undefined) ?? "operator";
+        this.observer.onGrantRequest({ tool: name, sessionId }, `operator write: ${name}`);
       }
       return ok({ status: "awaiting_human_grant", requiresHuman: true, detail: decision.reason });
     }

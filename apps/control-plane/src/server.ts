@@ -19,8 +19,10 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import type { Server } from "node:http";
 import { ApprovalInbox } from "./inbox.js";
 import { PolicyEditor } from "./policy.js";
+import { OperatorGrantInbox } from "./operator-grants.js";
 import { buildUI } from "./ui.js";
-import type { PolicyConfig, SessionView } from "./types.js";
+import { buildHandoffPage } from "./handoff-page.js";
+import type { ControlPlaneBackend, PolicyConfig, SessionView } from "./types.js";
 import type { SessionTrace } from "@lattice/observability";
 import { extractMetrics } from "@lattice/observability";
 
@@ -40,15 +42,26 @@ export class ControlPlaneServer {
   private readonly traces: TraceMetricsSummary[] = [];
   readonly inbox: ApprovalInbox;
   readonly policy: PolicyEditor;
+  readonly grants: OperatorGrantInbox | null;
+  private readonly backend: ControlPlaneBackend | null;
 
-  constructor(initial?: Partial<PolicyConfig>) {
+  constructor(initial?: Partial<PolicyConfig>, backend?: ControlPlaneBackend) {
     this.inbox = new ApprovalInbox();
     this.policy = new PolicyEditor(initial);
+    this.backend = backend ?? null;
+    this.grants = backend ? new OperatorGrantInbox(backend.kernel) : null;
 
     // Forward approval queue changes to SSE clients
     this.inbox.onRequest(() => {
       this.broadcast({ type: "approvals", data: this.inbox.pendingList() });
     });
+  }
+
+  /** Raise a pending operator-grant request (called by the gateway observer). */
+  requestOperatorGrant(scope: { tool: string; sessionId: string }, summary: string): void {
+    if (!this.grants) return;
+    this.grants.request(scope, summary);
+    this.broadcast({ type: "operator-grants", data: this.grants.pendingList() });
   }
 
   /** Register or update a live session view (called by gateway on snapshot). */
@@ -188,6 +201,75 @@ export class ControlPlaneServer {
       // P0: log intent; S9 will wire it to an agent
       const { intent } = (body ? JSON.parse(body) : {}) as { intent?: string };
       json(res, { queued: true, intent: intent ?? "" });
+      return;
+    }
+
+    // ── Operator-grant inbox (UI approves → mints on the shared kernel) ────────
+    if (this.grants && method === "GET" && path === "/operator-grants") {
+      json(res, { grants: this.grants.pendingList() });
+      return;
+    }
+    const grantApprove = path.match(/^\/operator-grants\/([^/]+)\/approve$/);
+    if (this.grants && method === "POST" && grantApprove) {
+      const outcome = this.grants.approve(grantApprove[1]!);
+      this.broadcast({ type: "operator-grants", data: this.grants.pendingList() });
+      json(res, outcome); // { outcome:"approved", grant:"<token>" } — relayed to the agent
+      return;
+    }
+    const grantDeny = path.match(/^\/operator-grants\/([^/]+)\/deny$/);
+    if (this.grants && method === "POST" && grantDeny) {
+      const body = await readBody(req);
+      const { reason } = (body ? JSON.parse(body) : {}) as { reason?: string };
+      const outcome = this.grants.deny(grantDeny[1]!, reason);
+      this.broadcast({ type: "operator-grants", data: this.grants.pendingList() });
+      json(res, outcome);
+      return;
+    }
+
+    // ── Human handoff (claim / approve / mediated input) ───────────────────────
+    if (this.backend && method === "GET" && path === "/handoffs") {
+      json(res, { handoffs: this.backend.handoffs.pending() });
+      return;
+    }
+    const handoffPage = path.match(/^\/handoff\/([^/]+)$/);
+    if (this.backend && method === "GET" && handoffPage) {
+      const h = this.backend.handoffs.get(handoffPage[1]!);
+      if (!h) { res.writeHead(404).end("handoff not found"); return; }
+      // Anti-phishing: render ONLY when the signature verifies.
+      if (!this.backend.handoffs.verifySignature(h)) { res.writeHead(403).end("invalid signature"); return; }
+      if (h.status === "expired") { res.writeHead(410).end("handoff expired"); return; }
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(buildHandoffPage(h));
+      return;
+    }
+    const handoffClaim = path.match(/^\/handoff\/([^/]+)\/claim$/);
+    if (this.backend && method === "POST" && handoffClaim) {
+      const body = await readBody(req);
+      const { deviceId } = (body ? JSON.parse(body) : {}) as { deviceId?: string };
+      const claimed = this.backend.handoffs.claim(handoffClaim[1]!, deviceId ?? "web");
+      this.broadcast({ type: "handoffs", data: this.backend.handoffs.pending() });
+      json(res, { claimed });
+      return;
+    }
+    const handoffApprove = path.match(/^\/handoff\/([^/]+)\/approve$/);
+    if (this.backend && method === "POST" && handoffApprove) {
+      const body = await readBody(req);
+      const { deviceId, approved } = (body ? JSON.parse(body) : {}) as { deviceId?: string; approved?: boolean };
+      const ok2 = this.backend.handoffs.resolveApproval(handoffApprove[1]!, deviceId ?? "web", approved !== false);
+      this.broadcast({ type: "handoffs", data: this.backend.handoffs.pending() });
+      json(res, { resolved: ok2 });
+      return;
+    }
+    const handoffInput = path.match(/^\/handoff\/([^/]+)\/input$/);
+    if (this.backend && method === "POST" && handoffInput) {
+      const body = await readBody(req);
+      const { deviceId, sessionId, fieldNodeId, value } = (body ? JSON.parse(body) : {}) as
+        { deviceId?: string; sessionId?: string; fieldNodeId?: string; value?: string };
+      // The value flows backend→form via Vault; it is never echoed back here.
+      const filled = await this.backend.submitHandoffInput(
+        handoffInput[1]!, deviceId ?? "web", sessionId ?? "", fieldNodeId ?? "", value ?? "",
+      );
+      this.broadcast({ type: "handoffs", data: this.backend.handoffs.pending() });
+      json(res, { filled, note: "value written to the form — not retained" });
       return;
     }
 
