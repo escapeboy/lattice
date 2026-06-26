@@ -22,6 +22,8 @@ export { snapshotToIG, parseSnapshotTree, igDelta } from "./from-snapshot.js";
 export type { SnapshotIG, SnapshotIGOptions, TaintMark } from "./from-snapshot.js";
 export { compactNode, compactNodes, compactDelta } from "./compact.js";
 export type { CompactNode, CompactDelta } from "./compact.js";
+export { PerceptionCache } from "./cache.js";
+export type { CacheResolution } from "./cache.js";
 
 import type { CDPHandle } from "@lattice/engine";
 import { PerceptionEngineImpl } from "./engine.js";

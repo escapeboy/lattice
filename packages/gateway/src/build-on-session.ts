@@ -16,7 +16,7 @@
 import type { SecurityKernel } from "@lattice/kernel";
 import type { EngineSession } from "@lattice/engine-adapter";
 import { snapshotToIG, igDelta } from "@lattice/perception";
-import type { SnapshotIG, IGDelta } from "@lattice/perception";
+import type { SnapshotIG, IGDelta, PerceptionCache, CacheResolution } from "@lattice/perception";
 import { GovernedActuator, RecoveryExecutor, locateInIG } from "@lattice/action";
 import type {
   ActionCommand,
@@ -32,10 +32,13 @@ export interface BuildOnSessionContext {
   readonly sessionId: string;
   /** Optional shared per-origin rate limiter (P1.2). */
   readonly rateLimiter?: RateLimiterPort;
+  /** Optional shared per-origin perception cache (P2.2). */
+  readonly cache?: PerceptionCache;
 }
 
 export class BuildOnSession {
   private lastIG: SnapshotIG | undefined;
+  private lastResolution: CacheResolution | undefined;
   private readonly actuator: GovernedActuator;
 
   constructor(
@@ -53,7 +56,20 @@ export class BuildOnSession {
   async perceive(tier: "L1" | "L2" = "L1"): Promise<SnapshotIG> {
     const raw = await this.engine.snapshot({ interactive: tier === "L1" });
     this.lastIG = snapshotToIG(raw, { tier });
+    // Per-origin cache (P2.2): record what is new/changed vs what this origin has
+    // already delivered. The cache stores page-origin nodes and is NOT a taint
+    // bypass — taint is reasserted at the gateway boundary on delivery.
+    if (this.ctx.cache) this.lastResolution = this.ctx.cache.resolve(this.ctx.origin, this.lastIG.graph);
     return this.lastIG;
+  }
+
+  /**
+   * The per-origin cache resolution for the last perceive (P2.2), or undefined if
+   * no cache is wired. A cache-aware gateway ships `sentNodes`/`removedIds`
+   * instead of the full node set on a warm revisit.
+   */
+  get cacheResolution(): CacheResolution | undefined {
+    return this.lastResolution;
   }
 
   /** Gate + execute a semantic action. Auto-perceives once if no anchor exists. */

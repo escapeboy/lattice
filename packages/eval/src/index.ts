@@ -30,3 +30,5 @@ export { ATTACKS, runGovernanceEval, formatGovernanceReport } from "./governance
 export type { Attack, AttackClass, GovernanceResult } from "./governance.js";
 export { runRecoveryEval, formatRecoveryReport } from "./recovery-eval.js";
 export type { RecoveryEvalResult, RecoveryRowResult } from "./recovery-eval.js";
+export { runCacheEval, formatCacheReport } from "./cache-eval.js";
+export type { CacheEvalResult } from "./cache-eval.js";

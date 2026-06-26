@@ -7,6 +7,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { BuildOnSession } from "./build-on-session.js";
+import { PerceptionCache } from "@lattice/perception";
 import { createSecurityKernel } from "@lattice/kernel";
 import { AgentBrowserEngine } from "@lattice/engine-adapter";
 import type {
@@ -189,5 +190,31 @@ describe("BuildOnSession — bounded failure recovery (P2.1)", () => {
     );
     expect(result.outcome).toBe("handoff");
     expect(handoffs).toBe(1);
+  });
+});
+
+describe("BuildOnSession — per-origin perception cache (P2.2)", () => {
+  it("a warm revisit reuses the cached skeleton (cacheResolution shows nothing new)", async () => {
+    const engine = new FakeEngine();
+    engine.tree = '- list "Items" [ref=e1]\n  - button "Save" [ref=e2]';
+    const cache = new PerceptionCache();
+    const session = new BuildOnSession(engine, kernel(), { origin: ORIGIN, sessionId: "s1", cache });
+
+    const cold = (await session.perceive(), session.cacheResolution!);
+    expect(cold.warm).toBe(false);
+    expect(cold.sentNodes.length).toBeGreaterThan(0); // cold pays the skeleton
+
+    // Same page again (a revisit, identical state).
+    await session.perceive();
+    const warm = session.cacheResolution!;
+    expect(warm.warm).toBe(true);
+    expect(warm.sentNodes.length).toBe(0); // nothing re-sent
+  });
+
+  it("the cache stays out of the way when not wired (cacheResolution undefined)", async () => {
+    const engine = new FakeEngine();
+    const session = new BuildOnSession(engine, kernel(), { origin: ORIGIN, sessionId: "s2" });
+    await session.perceive();
+    expect(session.cacheResolution).toBeUndefined();
   });
 });
