@@ -86,6 +86,10 @@ export function buildUI(serverOrigin: string): string {
   .toast { position:fixed; bottom:20px; right:20px; background:var(--panel); border:1px solid var(--border);
     border-left:3px solid var(--green); border-radius:10px; padding:12px 16px; font-size:13px; opacity:0; transform:translateY(8px); transition:.25s; pointer-events:none; }
   .toast.show { opacity:1; transform:translateY(0); }
+  .flbl { display:block; font-size:11px; color:var(--muted); margin:10px 0 4px; }
+  .fin { width:100%; background:var(--panel-2); border:1px solid var(--border); color:var(--text);
+    border-radius:8px; padding:8px 10px; font:inherit; font-size:13px; }
+  .fin:focus { outline:none; border-color:var(--indigo); }
 </style>
 </head>
 <body>
@@ -125,8 +129,34 @@ export function buildUI(serverOrigin: string): string {
     </div>
 
     <div class="panel">
-      <div class="phead"><span class="accent a-green"></span><h2>Policy</h2><button class="btn-ghost" style="margin-left:auto;padding:3px 10px;font-size:11px" onclick="loadPolicy()">Refresh</button></div>
-      <div class="pbody"><div class="kv" id="policy"><span class="empty">Loading…</span></div></div>
+      <div class="phead"><span class="accent a-green"></span><h2>Policy &amp; Settings</h2>
+        <button class="btn-ghost" id="pol-edit" style="margin-left:auto;padding:3px 10px;font-size:11px" onclick="togglePolicyEdit()">Edit</button>
+        <button class="btn-ghost" style="padding:3px 10px;font-size:11px" onclick="loadPolicy()">Refresh</button></div>
+      <div class="pbody">
+        <div class="kv" id="policy"><span class="empty">Loading…</span></div>
+        <div id="policy-edit" style="display:none">
+          <label class="flbl">Allowed origins (comma-separated)</label><input class="fin" id="f-origins" placeholder="https://app.example.com">
+          <label class="flbl">Egress allowlist</label><input class="fin" id="f-egress" placeholder="https://api.example.com">
+          <label class="flbl">Prohibited actions <span style="color:var(--faint)">(floor primitives always kept)</span></label><input class="fin" id="f-prohibited">
+          <label class="flbl">Requires grant</label><input class="fin" id="f-grant">
+          <label class="flbl">Budget limit (tokens)</label><input class="fin" id="f-budget" type="number" placeholder="0 = unlimited">
+          <div class="actions"><button class="btn-pri" onclick="savePolicy()">Apply to live kernel</button>
+            <button class="btn-ghost" onclick="togglePolicyEdit()">Cancel</button></div>
+          <div style="margin-top:8px;font-size:11px;color:var(--faint)">Tainting stays on and egress-from-content stays blocked — the constitutional floor is not editable.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="phead"><span class="accent a-violet"></span><h2>Persona Import · Chrome</h2></div>
+      <div class="pbody">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Import cookies from a real Chrome profile into a persona so the agent operates already logged-in. macOS prompts your Keychain; values go to the encrypted vault — never to the model.</div>
+        <label class="flbl">Persona ID</label><input class="fin" id="i-persona" placeholder="e.g. work-google">
+        <label class="flbl">Origins to import (comma-separated)</label><input class="fin" id="i-origins" placeholder="https://mail.google.com, https://github.com">
+        <label class="flbl">Chrome profile</label><input class="fin" id="i-profile" value="Default">
+        <div class="actions"><button class="btn-pri" onclick="importPersona()">Import from Chrome</button></div>
+        <div id="i-result" style="margin-top:8px;font-size:12px"></div>
+      </div>
     </div>
 
     <div class="panel wide">
@@ -231,7 +261,7 @@ async function resolveHo(id, ok){
 
 // ── Policy ────────────────────────────────────────────────────────────────────
 async function loadPolicy(){
-  var p=await get('/policy'); if(!p) return; var el=document.getElementById('policy');
+  var p=await get('/policy'); if(!p) return; lastPolicy=p; var el=document.getElementById('policy');
   function arr(a){ return (a&&a.length)? a.map(esc).join(', ') : '<span style="color:var(--faint)">none</span>'; }
   el.innerHTML='<b>Allowed origins</b><span>'+arr(p.allowedOrigins)+'</span>'+
     '<b>Egress allowlist</b><span>'+arr(p.egressAllowlist)+'</span>'+
@@ -239,6 +269,46 @@ async function loadPolicy(){
     '<b>Requires grant</b><span>'+arr(p.requireGrant)+'</span>'+
     '<b>Tainting</b><span><span class="badge b-green">on</span></span>'+
     '<b>Egress-from-content</b><span><span class="badge b-red">blocked</span></span>';
+}
+
+// ── Policy editing ────────────────────────────────────────────────────────────
+var polEditing=false, lastPolicy=null;
+function togglePolicyEdit(){
+  polEditing=!polEditing;
+  document.getElementById('policy').style.display=polEditing?'none':'grid';
+  document.getElementById('policy-edit').style.display=polEditing?'block':'none';
+  document.getElementById('pol-edit').textContent=polEditing?'View':'Edit';
+  if(polEditing&&lastPolicy){
+    var j=function(a){return (a||[]).join(', ');};
+    document.getElementById('f-origins').value=j(lastPolicy.allowedOrigins);
+    document.getElementById('f-egress').value=j(lastPolicy.egressAllowlist);
+    document.getElementById('f-prohibited').value=j(lastPolicy.prohibitedActions);
+    document.getElementById('f-grant').value=j(lastPolicy.requireGrant);
+  }
+}
+function splitList(id){ return document.getElementById(id).value.split(',').map(function(s){return s.trim();}).filter(Boolean); }
+async function savePolicy(){
+  var patch={ allowedOrigins:splitList('f-origins'), egressAllowlist:splitList('f-egress'),
+    prohibitedActions:splitList('f-prohibited'), requireGrant:splitList('f-grant') };
+  var b=document.getElementById('f-budget').value; if(b!=='') patch.budgetLimit=Number(b);
+  var r=await fetch(API+'/policy',{method:'PUT',headers:hdrs(true),body:JSON.stringify(patch)});
+  if(r.ok){ toast('Policy applied to live kernel'); polEditing=true; togglePolicyEdit(); loadPolicy(); }
+  else if(r.status===401){ toast('Unauthorized — enter the bearer token'); }
+  else { toast('Apply failed'); }
+}
+
+// ── Persona import (Chrome) ───────────────────────────────────────────────────
+async function importPersona(){
+  var personaId=document.getElementById('i-persona').value.trim();
+  var origins=splitList('i-origins'); var profile=document.getElementById('i-profile').value.trim()||'Default';
+  var out=document.getElementById('i-result');
+  if(!personaId||!origins.length){ out.innerHTML='<span style="color:var(--amber)">Persona ID and at least one origin are required.</span>'; return; }
+  out.innerHTML='<span style="color:var(--muted)">Reading Chrome profile — approve the Keychain prompt…</span>';
+  var r=await fetch(API+'/persona-import',{method:'POST',headers:hdrs(true),body:JSON.stringify({personaId,profile,origins})});
+  if(r.status===401){ out.innerHTML='<span style="color:var(--amber)">Unauthorized — enter the bearer token.</span>'; return; }
+  var d=await r.json().catch(function(){return null;});
+  if(r.ok&&d){ out.innerHTML='<span style="color:var(--green)">Imported '+d.imported+' cookies into persona &ldquo;'+esc(personaId)+'&rdquo; — values went to the vault, never shown.</span>'; toast('Persona imported'); }
+  else { out.innerHTML='<span style="color:var(--red)">'+esc(d&&d.error?d.error:'Import failed')+'</span>'; }
 }
 
 // ── Traces / replay ───────────────────────────────────────────────────────────
@@ -275,6 +345,7 @@ function connectSSE(){
     else if(m.type==='approvals'){ approvals=m.data; renderApprovals(); }
     else if(m.type==='operator-grants'){ grants=m.data; renderGrants(); }
     else if(m.type==='handoffs'){ handoffs=m.data; renderHandoffs(); }
+    else if(m.type==='policy'){ if(!polEditing) loadPolicy(); }
     else if(m.type==='trace'){ loadTraces(); }
   }catch(err){} };
   es.onerror=function(){ setConn(false); es.close(); setTimeout(connectSSE,3000); };

@@ -113,6 +113,24 @@ export class SessionRegistry {
     return this.scheduler.activeCount();
   }
 
+  /**
+   * Seed a persona's persistent state from imported cookies (human persona
+   * import). The next `persistent` session for this persona restores them, so
+   * the agent operates as the already-logged-in human — without ever seeing the
+   * values. Merges into any existing snapshot.
+   */
+  importPersona(personaId: string, cookies: SnapshotData["cookies"]): number {
+    const prev = this.personaState.get(personaId);
+    const merged: SnapshotData = {
+      cookies: [...(prev?.cookies ?? []), ...cookies],
+      localStorage: prev?.localStorage ?? {},
+      sessionStorage: prev?.sessionStorage ?? {},
+      currentUrl: prev?.currentUrl ?? "",
+    };
+    this.personaState.set(personaId, merged);
+    return cookies.length;
+  }
+
   async destroyAll(): Promise<void> {
     const ids = Array.from(this.sessions.keys());
     await Promise.allSettled(ids.map((id) => this.destroy(id)));

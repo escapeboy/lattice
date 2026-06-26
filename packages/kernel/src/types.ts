@@ -118,6 +118,12 @@ export interface SecurityKernel {
   mintHumanGrant(scope: GrantScope): string;
   /** Authorize an operator-surface invocation against tier/floor/grant/taint. */
   authorizeOperator(req: OperatorRequest): OperatorDecision;
+  /**
+   * Record a human-initiated persona import in the immutable audit log. ONLY
+   * the control-plane import seam calls this — it is not reachable from any MCP
+   * tool, so an agent cannot forge an import record.
+   */
+  recordHumanImport(personaId: string, origins: string[], cookieCount: number): void;
   auditLog(): ReadonlyArray<AuditEvent>;
   clearAuditLog(): void;
 }

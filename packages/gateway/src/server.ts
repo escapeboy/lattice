@@ -497,6 +497,45 @@ export class GatewayServer {
   }
 
   /**
+   * Control-plane seam: a HUMAN edits policy from the UI. The human channel is
+   * the grant authority, so no token is needed — but the constitutional floor
+   * still holds: kernel.applyPolicy re-asserts the floor primitives and the
+   * non-editable invariants (tainting on, egress-from-content blocked). Applies
+   * to BOTH the live kernel enforcement and the snapshot the UI reads.
+   */
+  applyOperatorPolicy(patch: { allowedOrigins?: string[]; egressAllowlist?: string[]; prohibitedActions?: string[]; requireGrant?: string[] }): PolicySnapshot {
+    const applied = this.operatorStore.setPolicy(patch);
+    this.kernel.applyPolicy({
+      ...(patch.allowedOrigins ? { allowedOrigins: patch.allowedOrigins } : {}),
+      ...(patch.egressAllowlist ? { egressAllowlist: patch.egressAllowlist } : {}),
+      prohibitedActions: applied.prohibitedActions,
+    });
+    return applied;
+  }
+
+  /** Control-plane seam: a human sets the token budget from the UI. */
+  setOperatorBudget(limitTokens: number): void {
+    this.operatorStore.setBudget(limitTokens);
+  }
+
+  /**
+   * Control-plane seam: inject HUMAN-imported cookies into a persona's
+   * persistent state, and audit the import. The values flow caller→persona
+   * state and are never returned or exposed to the model. This is the only
+   * route by which persona_import takes effect — the agent MCP path stays
+   * refused (prohibited tier).
+   */
+  importPersonaCookies(
+    personaId: string,
+    origins: string[],
+    cookies: Parameters<SessionRegistry["importPersona"]>[1],
+  ): number {
+    const n = this.sessions.importPersona(personaId, cookies);
+    this.kernel.recordHumanImport(personaId, origins, n);
+    return n;
+  }
+
+  /**
    * Control-plane seam: fulfil a Type B (input) handoff by writing the value
    * into the claimed session's field. The value flows here → form and is never
    * retained or logged — the human channel sources it (Vault/PWA), not the agent.
