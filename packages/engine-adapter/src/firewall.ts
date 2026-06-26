@@ -31,6 +31,10 @@ export const FIREWALLED_SUBCOMMANDS: ReadonlySet<string> = new Set([
   "connect", // attach to an arbitrary CDP endpoint → full kernel bypass
   "profiler", // DevTools profile dump (local I/O)
   "auth", // saved credential profiles (credential-bearing)
+  "network", // route/abort/mock traffic — a response-injection + firewall-tamper
+  //            primitive. Lattice installs egress routes PRIVILEGED; the agent
+  //            must never reach `network` (it could mock responses or unroute
+  //            the egress firewall). upstream calls it production-traffic-grade.
 ]);
 
 /** Flags that bypass the kernel or read local plaintext state. */
