@@ -69,6 +69,7 @@ export type SemanticAction =
   | { type: "select"; target: Locator; values: string[] }
   | { type: "submit"; target: Locator }
   | { type: "hover"; target: Locator }
+  | { type: "scrollIntoView"; target: Locator }
   | { type: "scroll"; direction: "up" | "down" | "left" | "right"; px?: number }
   | { type: "wait"; ms: number };
 

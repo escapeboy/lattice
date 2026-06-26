@@ -100,6 +100,8 @@ class AgentBrowserSession implements EngineSession {
         return this.targeted(action.target, "click", []);
       case "hover":
         return this.targeted(action.target, "hover", []);
+      case "scrollIntoView":
+        return this.targeted(action.target, "scrollintoview", []);
       case "fill":
         return this.targeted(action.target, "fill", [action.value]);
       case "type":

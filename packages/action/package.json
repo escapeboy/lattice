@@ -16,6 +16,8 @@
   },
   "dependencies": {
     "@lattice/engine": "workspace:*",
+    "@lattice/engine-adapter": "workspace:*",
+    "@lattice/kernel": "workspace:*",
     "@lattice/perception": "workspace:*"
   },
   "devDependencies": {
