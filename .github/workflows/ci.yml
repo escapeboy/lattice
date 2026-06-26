@@ -33,3 +33,17 @@ jobs:
 
       - name: Test
         run: pnpm test
+
+  macos-app:
+    name: macOS desktop build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Swift app
+        working-directory: apps/desktop-macos
+        run: swift build -c release
+
+      - name: Assemble .app bundle
+        working-directory: apps/desktop-macos
+        run: ./Scripts/make-app.sh release
