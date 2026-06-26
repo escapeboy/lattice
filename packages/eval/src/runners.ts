@@ -1,120 +1,150 @@
 /**
- * The two systems under comparison, run over identical scenarios:
+ * Measure the four systems under comparison on identical scenarios. The opponent
+ * is the CHROME METHOD (screenshot / raw-DOM); agent-browser is a semantic-engine
+ * PARITY reference, not the opponent.
  *
- *  - LATTICE: perceive → snapshotToIG (full IG on the first point, igDelta on
- *    later points), act by STABLE NodeId re-anchored to the current ref.
- *  - BARE agent-browser: consume the terse accessibility text each perceive
- *    point, act by re-finding the element by label in the current snapshot.
+ *  - LATTICE: compact IG on the first perceive, compact delta on later perceives;
+ *    act by STABLE NodeId re-anchored to the current ref.
+ *  - AGENT-BROWSER (parity): terse a11y text, line-diff on later perceives (it
+ *    ships `diff`); act by re-finding the label in the current snapshot.
+ *  - SCREENSHOT (Chrome method): a fixed vision-token cost every perceive step
+ *    (pixels can't be diffed for the model); acts by coordinates.
+ *  - RAW-DOM (Chrome method): the serialized DOM every perceive step; acts by
+ *    selector/xpath.
  *
- * To avoid strawmanning the baseline we measure agent-browser TWO ways:
- *  - ab_full: re-snapshot fully each perceive point (naive agent usage);
- *  - ab_diff: text line-diff on later points (agent-browser ships `diff`).
- * And we report the baseline's accuracy both when it re-finds (fair) and when it
- * naively caches refs (the failure mode Lattice's stable id prevents).
+ * Tokens are the gate vs the Chrome method. Accuracy is reported two ways: when
+ * a system RE-PERCEIVES each step (all can reach 100% on present targets) and
+ * when it NAIVELY caches an identifier to save tokens — the regime where
+ * Lattice's stable identity beats agent-browser's per-snapshot refs.
  */
 
 import { snapshotToIG, igDelta, compactNodes, compactDelta } from "@lattice/perception";
 import type { SnapshotIG } from "@lattice/perception";
 import { estimateTokens } from "./tokens.js";
-import { loadFrame, refByLabel } from "./fixtures.js";
-import type { Scenario } from "./scenarios.js";
+import { refByLabel, SCREENSHOT_TOKENS } from "./frame.js";
+import type { EvalFrame } from "./frame.js";
+import type { ResolvedScenario } from "./scenarios.js";
 
 export interface SystemResult {
   readonly perceiveCount: number;
   readonly perceptionTokens: number;
   readonly actionsTotal: number;
   readonly actionsResolved: number;
-  readonly accuracy: number; // actionsResolved / actionsTotal
+  readonly accuracy: number; // re-perceiving accuracy
 }
 
 export interface ScenarioResult {
   readonly scenario: string;
+  readonly steps: number;
   readonly lattice: SystemResult;
-  readonly abFull: SystemResult;
-  readonly abDiff: SystemResult;
-  /** Baseline accuracy if it naively reused first-seen refs (no re-find). */
+  readonly agentBrowser: SystemResult;
+  readonly screenshot: SystemResult;
+  readonly rawDom: SystemResult;
+  /** Raw-DOM if it diffed the serialized DOM instead of re-feeding it (transparency). */
+  readonly rawDomDiffTokens: number;
+  /** Accuracy when caching an id to skip re-find: Lattice stable id stays valid. */
+  readonly latticeNaiveAccuracy: number;
+  /** Accuracy when caching a ref to skip re-find: agent-browser refs churn. */
   readonly abNaiveAccuracy: number;
 }
 
-/** Simple line-level diff token cost: lines present in `next` but not `prev`. */
+/** Line-level diff token cost: lines present in `next` but not `prev`. */
 function lineDiffTokens(prev: string, next: string): number {
   const prevSet = new Set(prev.split("\n"));
   const added = next.split("\n").filter((l) => !prevSet.has(l));
   return estimateTokens(added.join("\n"));
 }
 
-// The COMPACT projection is the agent-facing wire shape (role + label, acted on
-// by stable NodeId) — the same shape the gateway ships. We measure that, not the
-// full internal node, because that is what the agent actually pays tokens for.
+/** Compact IG (the agent-facing wire shape), what the agent pays tokens for. */
 function serializeIG(ig: SnapshotIG): string {
   return JSON.stringify(compactNodes(ig.graph.nodes.values()));
 }
 
-export function runScenario(scenario: Scenario): ScenarioResult {
-  const frames = scenario.steps.map((s) => loadFrame(s.frame));
+function mk(perceiveCount: number, perceptionTokens: number, total: number, resolved: number): SystemResult {
+  return {
+    perceiveCount,
+    perceptionTokens,
+    actionsTotal: total,
+    actionsResolved: resolved,
+    accuracy: total === 0 ? 1 : resolved / total,
+  };
+}
+
+export function runScenario(scenario: ResolvedScenario): ScenarioResult {
+  const frames: ReadonlyArray<EvalFrame> = scenario.frames;
   const igs = frames.map((f) => snapshotToIG(f.raw, { tier: "L1" }));
 
-  // ── token cost ────────────────────────────────────────────────────────────
+  // ── token cost ──────────────────────────────────────────────────────────────
   let latticeTokens = 0;
-  let abFullTokens = 0;
-  let abDiffTokens = 0;
+  let abTokens = 0;
+  let screenshotTokens = 0;
+  let rawDomTokens = 0;
+  let rawDomDiffTokens = 0;
   for (let i = 0; i < frames.length; i++) {
     const f = frames[i]!;
-    abFullTokens += estimateTokens(f.snapshotText);
-    abDiffTokens += i === 0 ? estimateTokens(f.snapshotText) : lineDiffTokens(frames[i - 1]!.snapshotText, f.snapshotText);
+    const prevText = i === 0 ? "" : frames[i - 1]!.snapshotText;
+    const prevHtml = i === 0 ? "" : frames[i - 1]!.html;
+
     latticeTokens += i === 0 ? estimateTokens(serializeIG(igs[i]!)) : estimateTokens(JSON.stringify(compactDelta(igDelta(igs[i - 1]!.graph, igs[i]!.graph))));
+    abTokens += i === 0 ? estimateTokens(f.snapshotText) : lineDiffTokens(prevText, f.snapshotText);
+    screenshotTokens += SCREENSHOT_TOKENS; // paid in full every step
+    rawDomTokens += estimateTokens(f.html); // re-fed every step (Chrome-method practice)
+    rawDomDiffTokens += i === 0 ? estimateTokens(f.html) : lineDiffTokens(prevHtml, f.html);
   }
 
-  // ── action resolution / accuracy ────────────────────────────────────────────
+  // ── action resolution / accuracy ──────────────────────────────────────────────
   let total = 0;
   let latticeOk = 0;
   let abFairOk = 0;
+  let chromeOk = 0; // screenshot + raw-DOM re-perceive: present target → resolved
+  let latticeNaiveOk = 0;
   let abNaiveOk = 0;
-  // Naive baseline: remember the ref the FIRST time it saw each label.
   const cachedRef = new Map<string, string>();
+  const cachedNodeId = new Map<string, string>();
 
-  for (let i = 0; i < scenario.steps.length; i++) {
-    const step = scenario.steps[i]!;
+  for (let i = 0; i < frames.length; i++) {
     const frame = frames[i]!;
     const ig = igs[i]!;
-    for (const target of step.targets) {
+    for (const target of scenario.targets[i] ?? []) {
       total++;
 
-      // Lattice: find the node by label, re-anchor to the current ref, verify it
-      // points at the right element in THIS frame.
+      // Lattice: find by label, re-anchor stable id → current ref, verify.
       const node = [...ig.graph.nodes.values()].find((n) => n.label === target);
       const latticeRef = node ? ig.refMap.get(node.id) : undefined;
       if (latticeRef && frame.refs[latticeRef]?.name === target) latticeOk++;
 
-      // agent-browser fair: re-find by label in the current snapshot.
-      const fairRef = refByLabel(frame, target);
-      if (fairRef) abFairOk++;
+      // agent-browser fair: re-find the label in the current snapshot.
+      if (refByLabel(frame, target)) abFairOk++;
 
-      // agent-browser naive: reuse the first-seen ref; after a re-render it may
-      // now point at a different element.
+      // screenshot / raw-DOM re-perceiving: the target is present this frame.
+      if (refByLabel(frame, target)) chromeOk++;
+
+      // Naive (cache to skip re-find): Lattice caches the STABLE id, agent-browser
+      // caches the volatile ref.
+      if (node && !cachedNodeId.has(target)) cachedNodeId.set(target, node.id);
+      const cachedId = cachedNodeId.get(target);
+      const reRef = cachedId ? ig.refMap.get(cachedId as never) : undefined;
+      if (reRef && frame.refs[reRef]?.name === target) latticeNaiveOk++;
+
       if (!cachedRef.has(target)) {
         const r = refByLabel(frame, target);
         if (r) cachedRef.set(target, r);
       }
-      const naive = cachedRef.get(target);
-      if (naive && frame.refs[naive]?.name === target) abNaiveOk++;
+      const naiveRef = cachedRef.get(target);
+      if (naiveRef && frame.refs[naiveRef]?.name === target) abNaiveOk++;
     }
   }
 
-  const perceiveCount = frames.length;
-  const mk = (resolved: number): SystemResult => ({
-    perceiveCount,
-    perceptionTokens: 0,
-    actionsTotal: total,
-    actionsResolved: resolved,
-    accuracy: total === 0 ? 1 : resolved / total,
-  });
-
+  const n = frames.length;
   return {
     scenario: scenario.name,
-    lattice: { ...mk(latticeOk), perceptionTokens: latticeTokens },
-    abFull: { ...mk(abFairOk), perceptionTokens: abFullTokens },
-    abDiff: { ...mk(abFairOk), perceptionTokens: abDiffTokens },
+    steps: n,
+    lattice: mk(n, latticeTokens, total, latticeOk),
+    agentBrowser: mk(n, abTokens, total, abFairOk),
+    screenshot: mk(n, screenshotTokens, total, chromeOk),
+    rawDom: mk(n, rawDomTokens, total, chromeOk),
+    rawDomDiffTokens,
+    latticeNaiveAccuracy: total === 0 ? 1 : latticeNaiveOk / total,
     abNaiveAccuracy: total === 0 ? 1 : abNaiveOk / total,
   };
 }
