@@ -7,7 +7,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { ATTACKS, runGovernanceEval, formatGovernanceReport, wiredCountFor } from "./governance.js";
+import { ATTACKS, runGovernanceEval, formatGovernanceReport, wiredCountFor, DEPLOYMENT_DESKTOP } from "./governance.js";
 
 describe("governance eval — real kernel/firewall adjudication", () => {
   it("the corpus spans multiple distinct attack classes", () => {
@@ -70,5 +70,13 @@ describe("governance eval — real kernel/firewall adjudication", () => {
     expect(wiredCountFor({ engine: "cdp", egressAllowlistConfigured: true })).toBe(16);
     expect(wiredCountFor({ engine: "build-on", egressAllowlistConfigured: false })).toBe(18);
     expect(wiredCountFor({ engine: "build-on", egressAllowlistConfigured: true })).toBe(20);
+  });
+
+  it("DESKTOP default (ADR 0003 D6): egress proxy ON via first-run allowlist → 20/20 wired", () => {
+    const r = runGovernanceEval();
+    // The desktop app ships the proxy ON (guided first-run allowlist), so the
+    // 18/20 zero-config hole is closed — full 20/20 on the desktop default.
+    expect(wiredCountFor(DEPLOYMENT_DESKTOP)).toBe(r.total);
+    expect(wiredCountFor(DEPLOYMENT_DESKTOP)).toBe(20);
   });
 });

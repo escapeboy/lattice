@@ -28,7 +28,9 @@ public struct ControlPlaneRoot: View {
 
     public var body: some View {
         Group {
-            if let model = holder.model {
+            if stack.firstRunNeeded {
+                FirstRunView(stack: stack)
+            } else if let model = holder.model {
                 ControlPlaneView(model: model, mcpClient: stack.client)
             } else {
                 VStack(spacing: 10) {

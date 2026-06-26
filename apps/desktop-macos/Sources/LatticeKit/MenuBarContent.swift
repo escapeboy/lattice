@@ -27,13 +27,18 @@ public struct MenuBarContent: View {
                 Text(statusText).font(.caption)
             }
 
+            if stack.firstRunNeeded {
+                Label("First-run: set up the egress firewall", systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundStyle(.orange)
+            }
+
             Divider()
 
-            Button("Open Control Plane…") {
+            Button(stack.firstRunNeeded ? "Set up Lattice…" : "Open Control Plane…") {
                 openWindow(id: "control-plane")
                 NSApplication.shared.activate(ignoringOtherApps: true)
             }
-            .disabled(!isRunning)
+            .disabled(!isRunning && !stack.firstRunNeeded)
 
             Button("Quit Lattice") {
                 NSApplication.shared.terminate(nil)

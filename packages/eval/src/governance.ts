@@ -314,6 +314,14 @@ export interface DeploymentConfig {
 export const DEPLOYMENT_ZERO_CONFIG: DeploymentConfig = { engine: "build-on", egressAllowlistConfigured: false };
 /** `docker compose up` + `LATTICE_ALLOWED_ORIGINS`: build-on engine, proxy on. */
 export const DEPLOYMENT_CONFIGURED: DeploymentConfig = { engine: "build-on", egressAllowlistConfigured: true };
+/**
+ * The macOS desktop app default (ADR 0003 D6): build-on engine + egress proxy ON
+ * via the guided first-run allowlist. Unlike `docker compose up` (which defaults
+ * the proxy OFF to avoid breaking the demo), the desktop makes the secure config
+ * the default through setup UX — so the zero-config 18/20 hole is closed to 20/20.
+ * Note: on desktop the app proxy is the SOLE egress layer (no squid behind it).
+ */
+export const DEPLOYMENT_DESKTOP: DeploymentConfig = { engine: "build-on", egressAllowlistConfigured: true };
 
 /** Is an attack's kernel block actually reached by a caller under this config? */
 export function wiredUnder(a: Attack, cfg: DeploymentConfig): boolean {

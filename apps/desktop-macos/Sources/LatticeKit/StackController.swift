@@ -20,6 +20,8 @@ public final class StackController: ObservableObject {
     @Published public private(set) var state: StackState = .stopped
     /// A connected MCP client, available once the stack is `.running`.
     @Published public private(set) var client: MCPClient?
+    /// Whether the first-run egress allowlist has been configured (proxy ON).
+    @Published public private(set) var egressConfigured: Bool = DesktopEgress.isConfigured
 
     public let gatewayPort: Int
     public let controlPlanePort: Int
@@ -78,6 +80,18 @@ public final class StackController: ObservableObject {
         }
     }
 
+    /// True until the operator completes the guided first-run egress allowlist.
+    public var firstRunNeeded: Bool { !egressConfigured }
+
+    /// Persist the first-run allowlist and restart the stack so the egress proxy
+    /// comes up ON with it (the sole egress layer on desktop — D6).
+    public func applyAllowlist(_ origins: [String]) {
+        DesktopEgress.setAllowlist(origins)
+        egressConfigured = true
+        if supervisor != nil { stopStack() }
+        startStack()
+    }
+
     /// Tear the stack down cleanly (zero orphans). Safe to call on app quit.
     public func stopStack() {
         supervisor?.stop()
@@ -108,8 +122,33 @@ public final class StackController: ObservableObject {
     }
 }
 
-/// Desktop egress configuration hook. Fleshed out in D6 (proxy ON by default +
-/// first-run allowlist). D2 ships it as a no-op so the wiring exists.
+/// Desktop egress posture (ADR 0003 D6): the egress proxy is ON by default,
+/// configured through a guided first-run allowlist. On desktop there is no infra
+/// layer behind the proxy, so it is the SOLE egress defense — which is why the
+/// secure config is made the default via setup UX (closing the server's 18/20
+/// zero-config hole to 20/20) rather than left to an env var.
 public enum DesktopEgress {
-    public static func environment() -> [String: String] { [:] }
+    private static let originsKey = "net.lattice.allowedOrigins"
+    private static let configuredKey = "net.lattice.egressConfigured"
+
+    public static var isConfigured: Bool { UserDefaults.standard.bool(forKey: configuredKey) }
+
+    public static var allowlist: [String] {
+        UserDefaults.standard.stringArray(forKey: originsKey) ?? []
+    }
+
+    public static func setAllowlist(_ origins: [String]) {
+        let cleaned = origins
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        UserDefaults.standard.set(cleaned, forKey: originsKey)
+        UserDefaults.standard.set(true, forKey: configuredKey)
+    }
+
+    /// Env for the backend: when an allowlist is set, ship it so the egress proxy
+    /// starts ON (origin-gated). Empty before first-run.
+    public static func environment() -> [String: String] {
+        let origins = allowlist
+        return origins.isEmpty ? [:] : ["LATTICE_ALLOWED_ORIGINS": origins.joined(separator: ",")]
+    }
 }

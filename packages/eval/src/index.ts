@@ -33,6 +33,7 @@ export {
   wiredCountFor,
   DEPLOYMENT_ZERO_CONFIG,
   DEPLOYMENT_CONFIGURED,
+  DEPLOYMENT_DESKTOP,
 } from "./governance.js";
 export type { DeploymentConfig } from "./governance.js";
 export type { Attack, AttackClass, GovernanceResult } from "./governance.js";
