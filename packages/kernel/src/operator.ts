@@ -242,8 +242,12 @@ export class OperatorGate {
  * egress to content-proposed destinations.
  */
 export function violatesFloor(args: Record<string, unknown>): boolean {
-  // Disabling tainting is never allowed.
+  // Disabling tainting is never allowed. Guard BOTH the enforcement key and the
+  // name the floor declares itself under (`taintingAlwaysOn`) — an attacker who
+  // reads CONSTITUTIONAL_FLOOR's field names must not find a spelling that is
+  // accepted-but-ignored instead of refused.
   if (args["taintingEnabled"] === false) return true;
+  if (args["taintingAlwaysOn"] === false) return true;
   // Allowing content-proposed egress is never allowed.
   if (args["egressFromContentAllowed"] === true) return true;
   // If a new prohibited list is supplied, it must still contain every floor

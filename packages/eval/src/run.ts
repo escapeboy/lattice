@@ -1,6 +1,8 @@
-/** CLI: print the eval gate report. `node dist/run.js` */
+/** CLI: print the perception eval gate and the governance eval gate. `node dist/run.js` */
 import { runEval, formatReport } from "./report.js";
+import { runGovernanceEval, formatGovernanceReport } from "./governance.js";
 
-const report = runEval();
-console.log(formatReport(report));
-process.exitCode = 0; // the gate verdict is informational; never fail the process
+console.log(formatReport(runEval()));
+console.log("\n\n");
+console.log(formatGovernanceReport(runGovernanceEval()));
+process.exitCode = 0; // the gate verdicts are informational; never fail the process

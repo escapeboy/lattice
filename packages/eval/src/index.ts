@@ -26,3 +26,5 @@ export {
   taskTrackerFlow,
 } from "./synth.js";
 export type { SynthNode, AppState, SynthStep } from "./synth.js";
+export { ATTACKS, runGovernanceEval, formatGovernanceReport } from "./governance.js";
+export type { Attack, AttackClass, GovernanceResult } from "./governance.js";

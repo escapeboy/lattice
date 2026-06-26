@@ -191,6 +191,9 @@ importers:
       '@lattice/engine-adapter':
         specifier: workspace:*
         version: link:../engine-adapter
+      '@lattice/kernel':
+        specifier: workspace:*
+        version: link:../kernel
       '@lattice/perception':
         specifier: workspace:*
         version: link:../perception
