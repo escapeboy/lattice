@@ -13,9 +13,13 @@ services:
       LATTICE_PORT: "8765"
       LATTICE_HOST: "0.0.0.0"
       LATTICE_TRANSPORT: "http"
-      # Engine: "cdp" (default, system Chromium) or "agent-browser" (build-on,
-      # ADR 0002 — downloads its own Chrome for Testing on first run).
-      LATTICE_ENGINE: "${LATTICE_ENGINE:-cdp}"
+      # Engine (ADR 0002): the DEFAULT is the build-on (firewalled) stack, mirroring
+      # `apps/serve` (resolveEngineKind) — eval / raw-CDP / file access are
+      # structurally absent, so the escape-hatch attack classes are wired out of the
+      # box. agent-browser downloads its own Chrome for Testing on first run.
+      # LATTICE_ENGINE=cdp selects the legacy raw-CDP engine, which LACKS the
+      # build-on firewall: an explicit, UNSAFE dev-only override — never in prod.
+      LATTICE_ENGINE: "${LATTICE_ENGINE:-agent-browser}"
       LATTICE_DEVICE: "${LATTICE_DEVICE:-}"
       # Security policy — tighten these for your deployment.
       LATTICE_ALLOWED_ORIGINS: "${LATTICE_ALLOWED_ORIGINS:-}"

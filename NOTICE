@@ -1,5 +1,5 @@
 Lattice
-Copyright 2026 Lattice
+Copyright 2026 The Lattice Authors
 
 Licensed under the Apache License, Version 2.0.
 
@@ -9,6 +9,12 @@ This product builds on (and does not modify) third-party software:
   Source:  https://github.com/vercel-labs/agent-browser
   License: Apache License 2.0
   Pinned:  0.31.0  (see packages/engine-adapter)
+
+  playwright-core — https://playwright.dev
+  Source:  https://github.com/microsoft/playwright
+  License: Apache License 2.0
+  Copyright (c) Microsoft Corporation
+  Pinned:  ^1.61.1  (see packages/engine, packages/gateway, apps/serve)
 
 agent-browser is used unmodified as an internal engine, invoked as a child
 process behind the Lattice engine-adapter. Per ADR 0002, the agent-browser
