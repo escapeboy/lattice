@@ -145,6 +145,39 @@ describe("@lattice/kernel — egress firewall", () => {
   });
 });
 
+describe("@lattice/kernel — origin scoping (navigation)", () => {
+  it("empty allowlist allows any navigation (dev default)", () => {
+    const k = createSecurityKernel({ ...defaultConfig, allowedOrigins: [] });
+    expect(k.checkNavigation("https://anywhere.example/x")).toBe(true);
+  });
+
+  it("blocks a navigation outside the allowed origins", () => {
+    const k = createSecurityKernel({ ...defaultConfig, allowedOrigins: ["https://app.example.com"] });
+    expect(k.checkNavigation("https://evil.example.org/x")).toBe(false);
+  });
+
+  it("allows an in-scope navigation", () => {
+    const k = createSecurityKernel({ ...defaultConfig, allowedOrigins: ["https://app.example.com"] });
+    expect(k.checkNavigation("https://app.example.com/dashboard")).toBe(true);
+  });
+
+  it("treats subdomains as distinct origins", () => {
+    const k = createSecurityKernel({ ...defaultConfig, allowedOrigins: ["https://app.example.com"] });
+    expect(k.checkNavigation("https://evil.app.example.com/x")).toBe(false);
+  });
+
+  it("allows schemeless contexts (data:/about:) regardless of allowlist", () => {
+    const k = createSecurityKernel({ ...defaultConfig, allowedOrigins: ["https://app.example.com"] });
+    expect(k.checkNavigation("data:text/html,<h1>x</h1>")).toBe(true);
+    expect(k.checkNavigation("about:blank")).toBe(true);
+  });
+
+  it("blocks a malformed navigation URL when scoped", () => {
+    const k = createSecurityKernel({ ...defaultConfig, allowedOrigins: ["https://app.example.com"] });
+    expect(k.checkNavigation("not a url")).toBe(false);
+  });
+});
+
 describe("@lattice/kernel — audit log", () => {
   it("every grant/egress event is recorded in audit log", async () => {
     const k = createSecurityKernel(defaultConfig);

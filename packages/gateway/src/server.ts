@@ -513,6 +513,11 @@ export class GatewayServer {
       case "act_execute": {
         const session = this.getSession(a["sessionId"] as string);
         const command = a["command"] as Parameters<typeof session.action.execute>[0];
+        // Origin scoping: a navigation outside the task's allowed origins is
+        // blocked before it executes (no wandering without escalation).
+        if (command.type === "navigate" && typeof command.url === "string" && !this.kernel.checkNavigation(command.url)) {
+          return err(`origin_out_of_scope: navigation to ${command.url} is outside the task's allowed origins`);
+        }
         session.recorder.recordAction(command);
         try {
           const result = await session.action.execute(command);

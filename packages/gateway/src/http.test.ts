@@ -126,7 +126,7 @@ describeIfBrowser("Gateway — external agent end-to-end over HTTP (S10)", () =>
     engine = createEngineAdapter();
     await engine.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
     const kernel = createSecurityKernel({
-      allowedOrigins: ["http://127.0.0.1"],
+      allowedOrigins: [] /* unrestricted: dynamic ports */,
       egressAllowlist: [],
       prohibitedActions: [],
     });

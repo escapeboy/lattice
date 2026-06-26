@@ -184,7 +184,7 @@ describeIfBrowser("GatewayServer — browser integration", () => {
     });
 
     const kernel = new SecurityKernelImpl({
-      allowedOrigins: ["http://127.0.0.1"],
+      allowedOrigins: [] /* unrestricted: dynamic ports */,
       egressAllowlist: [],
       prohibitedActions: [],
     });

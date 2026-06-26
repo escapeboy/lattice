@@ -12,7 +12,7 @@
 import { describe, it, expect } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import { createEngineAdapter } from "@lattice/engine";
+import { createEngineAdapter, detectChromiumExecutable } from "@lattice/engine";
 import { SecurityKernelImpl } from "@lattice/kernel";
 import { createAgentGateway } from "./index.js";
 import type { GatewayServer } from "./server.js";
@@ -203,6 +203,36 @@ describe("operator surface — hardening: a leaf of a tainted observation is blo
     expect(res["reason"]).toBe("tainted_origin");
     await client.close();
     await gateway.stop();
+  });
+});
+
+describe("origin scoping — navigation gating", () => {
+  const exe = detectChromiumExecutable();
+  const itIfBrowser = exe ? it : it.skip;
+
+  itIfBrowser("blocks a navigate outside allowed origins; allows in-scope", async () => {
+    const engine = createEngineAdapter();
+    await engine.launch({ headless: true, ...(exe ? { executablePath: exe } : {}) });
+    const kernel = new SecurityKernelImpl({ allowedOrigins: ["https://example.com"], egressAllowlist: [], prohibitedActions: [] });
+    const gateway = createAgentGateway({ engine, kernel });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await gateway.getMCPServer().connect(st);
+    const client = new Client({ name: "scope-test", version: "0.0.1" });
+    await client.connect(ct);
+    try {
+      const { sessionId } = toolJson(await client.callTool({ name: "session_create", arguments: {} })) as { sessionId: string };
+      // Off-scope → blocked before executing.
+      const blocked = await client.callTool({ name: "act_execute", arguments: { sessionId, command: { type: "navigate", url: "https://evil.example.org/" } } });
+      expect((blocked as { isError?: boolean }).isError).toBe(true);
+      expect(toolText(blocked as { [x: string]: unknown })).toContain("origin_out_of_scope");
+      // data: URL has no origin → allowed.
+      const ok = toolJson(await client.callTool({ name: "act_execute", arguments: { sessionId, command: { type: "navigate", url: "data:text/html,<h1>ok</h1>" } } }));
+      expect(ok["success"]).toBe(true);
+    } finally {
+      await client.close();
+      await gateway.stop();
+      await engine.shutdown();
+    }
   });
 });
 
