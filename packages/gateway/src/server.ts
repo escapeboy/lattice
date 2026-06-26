@@ -637,15 +637,20 @@ export class GatewayServer {
         // Agent-facing wire shape is the COMPACT projection: the agent acts on
         // the stable NodeId and reads role + label, not the full node scaffold.
         // The trace recorder above keeps the full nodes for replay fidelity.
+        const compact = compactNodes(nodes);
         const payload = {
           tier: tier === "L3" ? "L3" : ig.tier,
           url: ig.url,
           title: ig.title,
           nodeCount: nodes.length,
           serializedSize: ig.serializedSize,
-          nodes: compactNodes(nodes),
+          nodes: compact,
           ...(d ? { delta: compactDelta(d) } : {}),
         };
+        // ALL page content the agent receives is tainted — not just session_observe.
+        // Registering it here is what makes a value laundered through perceive and
+        // forwarded into an operator-write arg fail the tainted-origin check.
+        this.taintAgentContent(compact, ig.title);
 
         // L3 = pixel tier: ship the IG plus a screenshot so a vision-capable
         // agent can reason about canvas/WebGL UIs the AX tree can't represent.
@@ -670,7 +675,9 @@ export class GatewayServer {
         const delta = session.perception.delta(session.lastSnapshot, current);
         session.recorder.recordDelta(delta.added.length, delta.removed.length, delta.updated.length, current.url);
         session.lastSnapshot = current;
-        return ok({ delta: compactDelta(delta), url: current.url });
+        const cd = compactDelta(delta);
+        this.taintAgentContent([...cd.added, ...cd.updated]);
+        return ok({ delta: cd, url: current.url });
       }
 
       case "perceive_subscribe": {
@@ -750,6 +757,9 @@ export class GatewayServer {
         session.recorder.recordAction({ type: "extract", query });
         const result = await session.action.execute({ type: "extract", query });
         session.recorder.recordActionResult(result.success, result.url, result.extracted);
+        // Extracted page content is tainted — it must not be laundered into an
+        // operator write through the agent.
+        if (result.extracted !== undefined) this.kernel.taintTree(result.extracted);
         return ok({ result: result.extracted });
       }
 
@@ -790,15 +800,11 @@ export class GatewayServer {
       }
 
       // ── vault.* ────────────────────────────────────────────────────────────
-      case "vault_store": {
-        const result = this.vault.store(
-          a["label"] as string,
-          a["origin"] as string,
-          a["username"] as string,
-          a["password"] as string,
-        );
-        return ok({ credentialId: result.id, note: "password stored — never returned via API" });
-      }
+      // vault_store is WRITE-tier (it seeds a credential the agent can later
+      // autofill) → it MUST go through the human-grant gate like every other
+      // write tool. (Audit: it previously stored unconditionally, ungated.)
+      case "vault_store":
+        return this.dispatchOperatorWrite(name, a);
 
       case "vault_list": {
         return ok({ credentials: this.vault.listPublic() });
@@ -998,6 +1004,22 @@ export class GatewayServer {
    * when allowed. A blocked write returns a typed, non-error result so the agent
    * can branch on it (request a handoff) rather than crash.
    */
+  /**
+   * Register the page-origin CONTENT fields (label, value, title) the agent just
+   * received as tainted, so a value laundered through any read path and forwarded
+   * into an operator-write argument fails the kernel's tainted-origin check. Only
+   * content fields are tainted (not structural id/role), to avoid registering
+   * generic tokens. Every read tool that returns page content calls this — not
+   * just session_observe.
+   */
+  private taintAgentContent(nodes: ReadonlyArray<{ label?: string; value?: string }>, title?: string): void {
+    if (title) this.kernel.taintContent(title);
+    for (const n of nodes) {
+      if (n.label) this.kernel.taintContent(n.label);
+      if (n.value) this.kernel.taintContent(n.value);
+    }
+  }
+
   private dispatchOperatorWrite(name: string, a: Record<string, unknown>): ToolResult {
     const decision = this.kernel.authorizeOperator(this.operatorReq(name, a));
     if (!decision.allowed) {
@@ -1064,6 +1086,15 @@ export class GatewayServer {
       }
       case "budget_set": {
         return ok({ status: "applied", budget: this.operatorStore.setBudget(a["limitTokens"] as number) });
+      }
+      case "vault_store": {
+        const result = this.vault.store(
+          a["label"] as string,
+          a["origin"] as string,
+          a["username"] as string,
+          a["password"] as string,
+        );
+        return ok({ status: "applied", credentialId: result.id, note: "password stored — never returned via API" });
       }
       default:
         return err(`Unknown operator write: ${name}`);

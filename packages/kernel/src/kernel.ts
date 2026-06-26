@@ -29,16 +29,14 @@ import type {
   TaintedStr,
 } from "./types.js";
 
-// Default prohibited action prefixes — never allowed regardless of config
-const ALWAYS_PROHIBITED = new Set([
-  "captcha",
-  "account.create",
-  "acl.change",
-  "permission.change",
-  "hard_delete",
-  "transfer",
-  "payment",
-]);
+// Default prohibited action prefixes — never allowed regardless of config.
+// DERIVED from the constitutional floor so there is ONE source of truth: adding
+// a primitive to CONSTITUTIONAL_FLOOR.prohibitedPrimitives prohibits it in
+// classify() too, instead of silently relying on a hand-copied (drift-prone)
+// duplicate. (Audit GAP #1: the copy had drifted, omitting persona_import.)
+const ALWAYS_PROHIBITED: ReadonlySet<string> = new Set(
+  CONSTITUTIONAL_FLOOR.prohibitedPrimitives.map((p) => p.toLowerCase()),
+);
 
 // Action types that are consequential by default
 const CONSEQUENTIAL_DEFAULTS = new Set([
@@ -346,9 +344,20 @@ const FORBIDDEN_NAV_SCHEMES = new Set([
  * false-blocking http/https/data/about. Char codes only (no control chars here).
  */
 function hasForbiddenScheme(url: string): boolean {
+  // Canonicalize before reading the scheme (mirrors engine-adapter's
+  // forbiddenUrlScheme): percent-decode, NFKC-normalize, then strip <=0x20 — so
+  // `fi%6ce:`, `file%3a`, fullwidth confusables, and tab/control obfuscation all
+  // collapse to the real scheme.
+  let decoded = url;
+  try {
+    decoded = decodeURIComponent(url);
+  } catch {
+    /* malformed %-sequence — fall back to the raw string */
+  }
+  decoded = decoded.normalize("NFKC");
   let s = "";
-  for (let i = 0; i < url.length; i++) {
-    if (url.charCodeAt(i) > 0x20) s += url[i];
+  for (let i = 0; i < decoded.length; i++) {
+    if (decoded.charCodeAt(i) > 0x20) s += decoded[i];
   }
   const colon = s.indexOf(":");
   if (colon < 0) return false;

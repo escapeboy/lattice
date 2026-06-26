@@ -205,6 +205,36 @@ describe("operator surface — NEGATIVE: write without human grant", () => {
     await client.close();
     await gateway.stop();
   });
+
+  // Audit GAP: vault_store is a WRITE-tier tool (it seeds a credential the agent
+  // can later autofill) but its dispatch skipped the grant gate entirely.
+  it("vault_store with no grant is blocked (credential write needs a human grant)", async () => {
+    const { client, gateway } = await build();
+    const res = toolJson(await client.callTool({
+      name: "vault_store",
+      arguments: { label: "evil", origin: "https://attacker.example", username: "a", password: "b" },
+    }));
+    expect(res["status"]).toBe("awaiting_human_grant");
+    expect(res["credentialId"]).toBeUndefined(); // nothing stored without the grant
+    // and it does not appear in the vault
+    const list = toolJson(await client.callTool({ name: "vault_list", arguments: {} }));
+    expect((list["credentials"] as unknown[]).length).toBe(0);
+    await client.close();
+    await gateway.stop();
+  });
+
+  it("vault_store WITH a human grant stores the credential", async () => {
+    const { client, gateway } = await build();
+    const grant = gateway.mintOperatorGrant({ tool: "vault_store", sessionId: "operator" });
+    const res = toolJson(await client.callTool({
+      name: "vault_store",
+      arguments: { grant, label: "ops", origin: "https://app.example.com", username: "u", password: "p" },
+    }));
+    expect(res["status"]).toBe("applied");
+    expect(res["credentialId"]).toBeDefined();
+    await client.close();
+    await gateway.stop();
+  });
 });
 
 // ── Hardening (from adversarial review) ──────────────────────────────────────

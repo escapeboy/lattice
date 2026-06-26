@@ -171,7 +171,26 @@ export class ActionExecutor {
 
   private async extractQuery(query: string): Promise<unknown> {
     const result = await this.cdp.send<EvaluateResult<unknown>>("Runtime.evaluate", {
-      expression: `
+      expression: buildExtractExpression(query),
+      returnByValue: true,
+    });
+    return result.result.value;
+  }
+}
+
+/**
+ * Build the in-page expression for an `extract` query. Supports declarative
+ * selectors ONLY — `text:`/`attr:`/`value:`. A non-selector query returns null;
+ * it is NOT evaluated as JavaScript.
+ *
+ * SECURITY (audit, escape-hatch): the previous default branch ran `eval(q)`
+ * in-page, which gave the agent arbitrary JS = a full kernel bypass (egress,
+ * token theft) on the CDP path. The build-on path already makes `extract`
+ * read-only; this aligns the CDP path with it. The expression is pure and
+ * exported so a test can assert it never contains `eval`.
+ */
+export function buildExtractExpression(query: string): string {
+  return `
         (function() {
           const q = ${JSON.stringify(query)};
           if (q.startsWith('text:')) {
@@ -188,12 +207,8 @@ export class ActionExecutor {
             return el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement
               ? el.value : null;
           }
-          // Default: evaluate as JS expression
-          return eval(q);
+          // No arbitrary-JS fallback: an unrecognized query yields null.
+          return null;
         })()
-      `,
-      returnByValue: true,
-    });
-    return result.result.value;
-  }
+      `;
 }
