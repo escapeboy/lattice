@@ -11,6 +11,7 @@ export { PolicyEditor } from "./policy.js";
 export { OperatorGrantInbox } from "./operator-grants.js";
 export { buildUI } from "./ui.js";
 export { buildHandoffPage } from "./handoff-page.js";
+export { buildReplayPage } from "./replay-page.js";
 export type {
   ApprovalDecision,
   ApprovalOutcome,

@@ -22,6 +22,7 @@ import { PolicyEditor } from "./policy.js";
 import { OperatorGrantInbox } from "./operator-grants.js";
 import { buildUI } from "./ui.js";
 import { buildHandoffPage } from "./handoff-page.js";
+import { buildReplayPage } from "./replay-page.js";
 import type { ControlPlaneBackend, PolicyConfig, SessionView } from "./types.js";
 import type { SessionTrace } from "@lattice/observability";
 import { extractMetrics } from "@lattice/observability";
@@ -40,6 +41,8 @@ export class ControlPlaneServer {
   private readonly sseClients = new Set<ServerResponse>();
   private readonly sessions = new Map<string, SessionView>();
   private readonly traces: TraceMetricsSummary[] = [];
+  /** Full traces kept for the replay viewer (ring-buffered). */
+  private readonly fullTraces = new Map<string, SessionTrace>();
   readonly inbox: ApprovalInbox;
   readonly policy: PolicyEditor;
   readonly grants: OperatorGrantInbox | null;
@@ -88,6 +91,11 @@ export class ControlPlaneServer {
       recordedAt: trace.endTs,
     });
     if (this.traces.length > 100) this.traces.length = 100;
+    this.fullTraces.set(trace.traceId, trace);
+    if (this.fullTraces.size > 50) {
+      const oldest = this.fullTraces.keys().next().value;
+      if (oldest !== undefined) this.fullTraces.delete(oldest);
+    }
     this.broadcast({ type: "trace", data: this.traces.slice(0, 10) });
   }
 
@@ -184,6 +192,20 @@ export class ControlPlaneServer {
 
     if (method === "GET" && path === "/traces") {
       json(res, { traces: this.traces });
+      return;
+    }
+
+    // Visual replay: perception snapshots vs actions on one timeline.
+    const replayMatch = path.match(/^\/replay\/([^/]+)$/);
+    if (method === "GET" && replayMatch) {
+      const trace = this.fullTraces.get(replayMatch[1]!);
+      if (!trace) { res.writeHead(404).end("trace not found"); return; }
+      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(buildReplayPage(trace));
+      return;
+    }
+
+    if (method === "GET" && path === "/replay") {
+      json(res, { traces: Array.from(this.fullTraces.keys()) });
       return;
     }
 
