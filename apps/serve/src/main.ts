@@ -12,6 +12,8 @@
  *   LATTICE_VAULT_KEY / LATTICE_VAULT_PATH    vault encryption + persistence
  */
 
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { createEngineAdapter, detectChromiumExecutable } from "@lattice/engine";
 import { SecurityKernelImpl } from "@lattice/kernel";
 import { NtfyTransport, Vault } from "@lattice/gateway";
@@ -47,10 +49,19 @@ async function main(): Promise<void> {
   const vaultKey = process.env["LATTICE_VAULT_KEY"];
   const vaultPath = process.env["LATTICE_VAULT_PATH"];
 
+  // Default trace sink: write each Svod note under LATTICE_TRACE_DIR.
+  const traceDir = process.env["LATTICE_TRACE_DIR"] ?? "./traces";
+  const traceWriter = async (path: string, content: string): Promise<void> => {
+    const abs = join(traceDir, `${path.replace(/[/\\]/g, "_")}.md`);
+    await mkdir(dirname(abs), { recursive: true });
+    await writeFile(abs, content, "utf8");
+  };
+
   const { gateway, control } = createLatticeCore({
     engine,
     kernel,
     vault: new Vault(vaultKey, vaultPath),
+    traceWriter,
     ...(ntfyBase ? { handoffTransport: new NtfyTransport(ntfyBase) } : {}),
     ...(handoffKey ? { handoffSigningKey: handoffKey } : {}),
   });

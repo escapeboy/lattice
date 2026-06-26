@@ -27,6 +27,7 @@ import { SessionRegistry } from "./sessions.js";
 import { Vault } from "./vault.js";
 import { OperatorStore, type DeviceChannel, type PolicySnapshot } from "./operator.js";
 import { HandoffManager, NullTransport, type HandoffType, type NotificationTransport } from "./handoff.js";
+import { CapabilityRegistry } from "./capability.js";
 import type { SessionTrace } from "@lattice/observability";
 
 /** A live view of a session, emitted to the control-plane theater. */
@@ -133,12 +134,17 @@ const TOOLS = [
   },
   {
     name: "capability_check",
-    description: "Check whether the current page exposes native MCP/WebMCP capabilities",
+    description: "Check whether the current page exposes native MCP/WebMCP capabilities. Caches per origin; returns fastPath=true + declared actions when the site speaks WebMCP.",
     inputSchema: {
       type: "object" as const,
       properties: { sessionId: { type: "string" } },
       required: ["sessionId"],
     },
+  },
+  {
+    name: "capability_list",
+    description: "List the cached per-origin capability map (which sites expose WebMCP fast paths)",
+    inputSchema: { type: "object" as const, properties: {} },
   },
   {
     name: "vault_store",
@@ -385,6 +391,7 @@ export class GatewayServer {
   private readonly kernel: SecurityKernel;
   private readonly operatorStore: OperatorStore;
   private readonly handoff: HandoffManager;
+  private readonly capabilities = new CapabilityRegistry();
   private readonly observer: GatewayObserver;
   /** Per-session action counter, for the theater view. */
   private readonly actionCounts = new Map<string, number>();
@@ -618,14 +625,38 @@ export class GatewayServer {
       // ── capability.* ───────────────────────────────────────────────────────
       case "capability_check": {
         const session = this.getSession(a["sessionId"] as string);
+        const url = session.context.currentUrl();
+        // Serve a fresh cached probe without re-touching the page.
+        const cached = this.capabilities.get(url);
+        if (cached) {
+          return ok({ nativeMCP: cached.nativeMCP, url, actions: cached.actions, fastPath: cached.nativeMCP, cached: true });
+        }
         const res = await session.context.cdp().send<{ result: { value: boolean } }>(
           "Runtime.evaluate",
           { expression: "typeof navigator.modelContext !== 'undefined'", returnByValue: true },
         ).catch(() => ({ result: { value: false } }));
+        const actions = res.result.value
+          ? await session.context.cdp().send<{ result: { value: string[] } }>(
+              "Runtime.evaluate",
+              { expression: "Object.keys((navigator.modelContext && navigator.modelContext.tools) || {})", returnByValue: true },
+            ).then((r) => r.result.value).catch(() => [])
+          : [];
+        const cap = this.capabilities.record(url, res.result.value, actions);
         return ok({
-          nativeMCP: res.result.value,
-          url: session.context.currentUrl(),
+          nativeMCP: cap.nativeMCP,
+          url,
+          actions: cap.actions,
+          // When the site speaks WebMCP, the agent can take the fast path
+          // (declared tool calls) instead of DOM scraping. Declarations are
+          // untrusted — still gated by the kernel like any action.
+          fastPath: cap.nativeMCP,
+          cached: false,
         });
+      }
+
+      case "capability_list": {
+        this.auditOperatorRead("policy_get"); // benign read; reuse audit kind
+        return ok({ origins: this.capabilities.list() });
       }
 
       // ── vault.* ────────────────────────────────────────────────────────────

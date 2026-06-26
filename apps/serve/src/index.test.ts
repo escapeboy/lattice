@@ -57,6 +57,33 @@ describe("LatticeCore — UI and MCP share one grant slice", () => {
   });
 });
 
+describe("LatticeCore — trace emission on teardown", () => {
+  it("invokes the trace writer with a Svod path + metrics when a session ends", async () => {
+    const exe = detectChromiumExecutable();
+    if (!exe) return; // needs a real session to produce a trace
+    const engine = createEngineAdapter();
+    await engine.launch({ headless: true, executablePath: exe });
+    const kernel = new SecurityKernelImpl({ allowedOrigins: [], egressAllowlist: [], prohibitedActions: [] });
+    const writes: Array<{ path: string; content: string }> = [];
+    const core = createLatticeCore({ engine, kernel, traceWriter: (path, content) => { writes.push({ path, content }); return Promise.resolve(); } });
+    const client = await connectGatewayClient(core);
+    try {
+      const { sessionId } = jsonOf(await client.callTool({ name: "session_create", arguments: {} })) as { sessionId: string };
+      await client.callTool({ name: "act_execute", arguments: { sessionId, command: { type: "navigate", url: "data:text/html,<h1>t</h1>" } } });
+      await client.callTool({ name: "session_destroy", arguments: { sessionId } });
+      // emit is fire-and-forget; let the microtask flush.
+      await new Promise((r) => setTimeout(r, 20));
+      expect(writes.length).toBe(1);
+      expect(writes[0]!.path).toContain("traces/");
+      expect(writes[0]!.content).toContain("Metrics");
+    } finally {
+      await client.close();
+      await core.gateway.stop();
+      await engine.shutdown();
+    }
+  });
+});
+
 const exe = detectChromiumExecutable();
 const describeIfBrowser = exe ? describe : describe.skip;
 

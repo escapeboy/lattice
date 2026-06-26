@@ -22,7 +22,8 @@
     "@lattice/control-plane": "workspace:*",
     "@lattice/engine": "workspace:*",
     "@lattice/gateway": "workspace:*",
-    "@lattice/kernel": "workspace:*"
+    "@lattice/kernel": "workspace:*",
+    "@lattice/observability": "workspace:*"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

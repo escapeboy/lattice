@@ -109,6 +109,9 @@ importers:
       '@lattice/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
+      '@lattice/observability':
+        specifier: workspace:*
+        version: link:../../packages/observability
     devDependencies:
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0

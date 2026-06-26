@@ -12,6 +12,7 @@ import { createAgentGateway, type GatewayServer, type NotificationTransport, typ
 import type { EngineAdapter } from "@lattice/engine";
 import type { SecurityKernel } from "@lattice/kernel";
 import { ControlPlaneServer } from "@lattice/control-plane";
+import { emitToSvod, type SvodWriteFn } from "@lattice/observability";
 
 export interface LatticeCore {
   gateway: GatewayServer;
@@ -24,6 +25,8 @@ export interface LatticeServeConfig {
   handoffTransport?: NotificationTransport;
   handoffSigningKey?: string;
   vault?: Vault;
+  /** Where finished traces are emitted (Svod note). File writer by default. */
+  traceWriter?: SvodWriteFn;
 }
 
 /**
@@ -55,7 +58,13 @@ export function createLatticeCore(config: LatticeServeConfig): LatticeCore {
           ...(view.lastSnapshotAt !== undefined ? { lastSnapshotAt: view.lastSnapshotAt } : {}),
         });
       },
-      onTrace: (trace) => ref.control?.submitTrace(trace),
+      onTrace: (trace) => {
+        ref.control?.submitTrace(trace);
+        // Best-effort emit to Svod (or a file writer); never block teardown.
+        if (config.traceWriter) {
+          void emitToSvod(trace, config.traceWriter).catch(() => { /* logged upstream */ });
+        }
+      },
       onGrantRequest: (scope, summary) => ref.control?.requestOperatorGrant(scope, summary),
     },
   });

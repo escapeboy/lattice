@@ -10,6 +10,7 @@
     { "path": "../../packages/engine" },
     { "path": "../../packages/gateway" },
     { "path": "../../packages/kernel" },
+    { "path": "../../packages/observability" },
     { "path": "../control-plane" }
   ]
 }
