@@ -13,6 +13,7 @@ import { TraceRecorder } from "@lattice/observability";
 import type { SessionTrace } from "@lattice/observability";
 import type { SnapshotData, RateLimitConfig } from "@lattice/runtime";
 import { OriginRateLimiter } from "@lattice/runtime";
+import { PerceptionCache } from "@lattice/perception";
 import { BuildOnSession } from "./build-on-session.js";
 import { BuildOnContext } from "./build-on-context.js";
 import { BuildOnPerceptionAdapter, BuildOnActionAdapter } from "./build-on-engine.js";
@@ -26,6 +27,8 @@ export interface BuildOnRegistryOptions {
   maxSessions?: number;
   /** Per-origin politeness rate limit (P1.2). Off when omitted. */
   rateLimit?: RateLimitConfig;
+  /** Per-origin perception cache (P2.2): amortizes the skeleton cost on revisits. */
+  perceptionCache?: boolean;
 }
 
 /** Thrown when the session governor's budget is exhausted. */
@@ -42,6 +45,8 @@ export class BuildOnSessionRegistry implements SessionProvider {
   private readonly personaCookies = new Map<string, SnapshotData["cookies"]>();
   /** Shared across sessions so a fan-out against one origin obeys the limit (P1.2). */
   private readonly rateLimiter: OriginRateLimiter | undefined;
+  /** Shared so a repeat visit to an origin reuses the cached skeleton (P2.2). */
+  private readonly perceptionCache: PerceptionCache | undefined;
 
   constructor(
     private readonly engine: SemanticEngine,
@@ -49,6 +54,7 @@ export class BuildOnSessionRegistry implements SessionProvider {
     private readonly opts: BuildOnRegistryOptions = {},
   ) {
     this.rateLimiter = opts.rateLimit ? new OriginRateLimiter(opts.rateLimit) : undefined;
+    this.perceptionCache = opts.perceptionCache ? new PerceptionCache() : undefined;
   }
 
   /** The shared per-origin limiter, if configured — network paths report 429/503 here. */
@@ -66,6 +72,7 @@ export class BuildOnSessionRegistry implements SessionProvider {
       origin: this.opts.origin ?? "",
       sessionId: id,
       ...(this.rateLimiter ? { rateLimiter: this.rateLimiter } : {}),
+      ...(this.perceptionCache ? { cache: this.perceptionCache } : {}),
     });
     const perception = new BuildOnPerceptionAdapter(buildOn);
     const action = new BuildOnActionAdapter(buildOn, perception);

@@ -7,6 +7,7 @@
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { BuildOnSession } from "./build-on-session.js";
+import { PerceptionCache } from "@lattice/perception";
 import { createSecurityKernel } from "@lattice/kernel";
 import { AgentBrowserEngine } from "@lattice/engine-adapter";
 import type {
@@ -152,5 +153,68 @@ live("BuildOnSession — governed end-to-end over real agent-browser (S4/S6)", (
     const buttonId = [...ig.graph.nodes.values()].find((n) => n.role === "button")!.id;
     const click = await session.act({ type: "act", target: { nodeId: buttonId } });
     expect(click.ok).toBe(true);
+  });
+});
+
+describe("BuildOnSession — bounded failure recovery (P2.1)", () => {
+  it("re-anchors a target whose surrounding restructured, via the alt-locator rung", async () => {
+    const engine = new FakeEngine();
+    engine.tree = '- list "Items" [ref=e1]\n  - button "Save" [ref=e2]';
+    const session = new BuildOnSession(engine, kernel(), { origin: ORIGIN, sessionId: "s1" });
+
+    const ig = await session.perceive();
+    const save = [...ig.graph.nodes.values()].find((n) => n.label === "Save")!;
+
+    // The page restructures: Save is wrapped in a new listitem → its stable id
+    // changes, but role+label persist. Re-anchor (rung 1) misses; the alt-locator
+    // (rung 2) finds it.
+    engine.tree = '- list "Items" [ref=e1]\n  - listitem "Row" [ref=e2]\n    - button "Save" [ref=e3]';
+    const result = await session.recover({ nodeId: save.id, role: save.role, label: save.label }, "element_gone");
+    expect(result.outcome).toBe("resolved");
+    expect(result.rung).toBe("alt_locator");
+  });
+
+  it("hands off (once, bounded) when the target is gone and no escalation sees it", async () => {
+    const engine = new FakeEngine();
+    engine.tree = '- list "Items" [ref=e1]\n  - button "Save" [ref=e2]';
+    const session = new BuildOnSession(engine, kernel(), { origin: ORIGIN, sessionId: "s2" });
+    const ig = await session.perceive();
+    const save = [...ig.graph.nodes.values()].find((n) => n.label === "Save")!;
+
+    engine.tree = '- list "Items" [ref=e1]\n  - button "Cancel" [ref=e2]'; // Save gone
+    let handoffs = 0;
+    const result = await session.recover(
+      { nodeId: save.id, role: save.role, label: save.label },
+      "element_gone",
+      { handoff: () => { handoffs++; return Promise.resolve(); } },
+    );
+    expect(result.outcome).toBe("handoff");
+    expect(handoffs).toBe(1);
+  });
+});
+
+describe("BuildOnSession — per-origin perception cache (P2.2)", () => {
+  it("a warm revisit reuses the cached skeleton (cacheResolution shows nothing new)", async () => {
+    const engine = new FakeEngine();
+    engine.tree = '- list "Items" [ref=e1]\n  - button "Save" [ref=e2]';
+    const cache = new PerceptionCache();
+    const session = new BuildOnSession(engine, kernel(), { origin: ORIGIN, sessionId: "s1", cache });
+
+    const cold = (await session.perceive(), session.cacheResolution!);
+    expect(cold.warm).toBe(false);
+    expect(cold.sentNodes.length).toBeGreaterThan(0); // cold pays the skeleton
+
+    // Same page again (a revisit, identical state).
+    await session.perceive();
+    const warm = session.cacheResolution!;
+    expect(warm.warm).toBe(true);
+    expect(warm.sentNodes.length).toBe(0); // nothing re-sent
+  });
+
+  it("the cache stays out of the way when not wired (cacheResolution undefined)", async () => {
+    const engine = new FakeEngine();
+    const session = new BuildOnSession(engine, kernel(), { origin: ORIGIN, sessionId: "s2" });
+    await session.perceive();
+    expect(session.cacheResolution).toBeUndefined();
   });
 });

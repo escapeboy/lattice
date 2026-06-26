@@ -16,19 +16,29 @@
 import type { SecurityKernel } from "@lattice/kernel";
 import type { EngineSession } from "@lattice/engine-adapter";
 import { snapshotToIG, igDelta } from "@lattice/perception";
-import type { SnapshotIG, IGDelta } from "@lattice/perception";
-import { GovernedActuator } from "@lattice/action";
-import type { ActionCommand, GovernedActionResult, ReAnchor, RateLimiterPort } from "@lattice/action";
+import type { SnapshotIG, IGDelta, PerceptionCache, CacheResolution } from "@lattice/perception";
+import { GovernedActuator, RecoveryExecutor, locateInIG } from "@lattice/action";
+import type {
+  ActionCommand,
+  GovernedActionResult,
+  ReAnchor,
+  RateLimiterPort,
+  RecoveryTarget,
+  LadderResult,
+} from "@lattice/action";
 
 export interface BuildOnSessionContext {
   readonly origin: string;
   readonly sessionId: string;
   /** Optional shared per-origin rate limiter (P1.2). */
   readonly rateLimiter?: RateLimiterPort;
+  /** Optional shared per-origin perception cache (P2.2). */
+  readonly cache?: PerceptionCache;
 }
 
 export class BuildOnSession {
   private lastIG: SnapshotIG | undefined;
+  private lastResolution: CacheResolution | undefined;
   private readonly actuator: GovernedActuator;
 
   constructor(
@@ -46,7 +56,20 @@ export class BuildOnSession {
   async perceive(tier: "L1" | "L2" = "L1"): Promise<SnapshotIG> {
     const raw = await this.engine.snapshot({ interactive: tier === "L1" });
     this.lastIG = snapshotToIG(raw, { tier });
+    // Per-origin cache (P2.2): record what is new/changed vs what this origin has
+    // already delivered. The cache stores page-origin nodes and is NOT a taint
+    // bypass — taint is reasserted at the gateway boundary on delivery.
+    if (this.ctx.cache) this.lastResolution = this.ctx.cache.resolve(this.ctx.origin, this.lastIG.graph);
     return this.lastIG;
+  }
+
+  /**
+   * The per-origin cache resolution for the last perceive (P2.2), or undefined if
+   * no cache is wired. A cache-aware gateway ships `sentNodes`/`removedIds`
+   * instead of the full node set on a warm revisit.
+   */
+  get cacheResolution(): CacheResolution | undefined {
+    return this.lastResolution;
   }
 
   /** Gate + execute a semantic action. Auto-perceives once if no anchor exists. */
@@ -54,6 +77,39 @@ export class BuildOnSession {
     if (!this.lastIG && command.type !== "navigate") await this.perceive();
     const result = await this.actuator.execute(command);
     return result;
+  }
+
+  /**
+   * Bounded failure recovery for a lost target (P2.1). The session performs the
+   * AUTONOMOUS rungs — re-perceive and re-anchor (rung 1), then an alternative
+   * role+attribute locator (rung 2). The L3-vision and handoff rungs need a model
+   * / human, so they are injected; defaults make them no-ops (the session does
+   * what it can and escalates). Single-pass by construction — never a retry loop.
+   */
+  async recover(
+    target: RecoveryTarget,
+    reason: string,
+    escalate: {
+      l3Locate?: (target: RecoveryTarget) => Promise<boolean>;
+      handoff?: (target: RecoveryTarget, reason: string) => Promise<void>;
+    } = {},
+  ): Promise<LadderResult> {
+    const executor = new RecoveryExecutor({
+      relocate: async (t) => {
+        const ig = await this.perceive();
+        const nodes = [...ig.graph.nodes.values()].map((n) => ({
+          id: n.id,
+          role: n.role,
+          label: n.label,
+          ...(n.value !== undefined ? { value: n.value } : {}),
+          ...(n.href !== undefined ? { href: n.href } : {}),
+        }));
+        return locateInIG(t, nodes, (id) => ig.refMap.get(id));
+      },
+      l3Locate: escalate.l3Locate ?? (() => Promise.resolve(false)),
+      handoff: escalate.handoff ?? (() => Promise.resolve()),
+    });
+    return executor.recover(target, reason);
   }
 
   /** Stable-id delta between two perceived snapshots (delta streaming basis). */
