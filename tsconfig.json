@@ -5,6 +5,7 @@
     { "path": "./packages/engine" },
     { "path": "./packages/perception" },
     { "path": "./packages/action" },
+    { "path": "./packages/recipe" },
     { "path": "./packages/runtime" },
     { "path": "./packages/kernel" },
     { "path": "./packages/gateway" },

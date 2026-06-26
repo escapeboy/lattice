@@ -32,3 +32,5 @@ export { runRecoveryEval, formatRecoveryReport } from "./recovery-eval.js";
 export type { RecoveryEvalResult, RecoveryRowResult } from "./recovery-eval.js";
 export { runCacheEval, formatCacheReport } from "./cache-eval.js";
 export type { CacheEvalResult } from "./cache-eval.js";
+export { runRecipeEval, formatRecipeReport } from "./recipe-eval.js";
+export type { RecipeEvalResult } from "./recipe-eval.js";

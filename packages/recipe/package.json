@@ -1,5 +1,5 @@
 {
-  "name": "@lattice/eval",
+  "name": "@lattice/recipe",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -12,19 +12,17 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit",
-    "eval": "node dist/run.js"
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@lattice/action": "workspace:*",
+    "@lattice/perception": "workspace:*"
   },
   "devDependencies": {
+    "@lattice/engine-adapter": "workspace:*",
+    "@lattice/kernel": "workspace:*",
     "@types/node": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
-  },
-  "dependencies": {
-    "@lattice/perception": "workspace:*",
-    "@lattice/engine-adapter": "workspace:*",
-    "@lattice/kernel": "workspace:*",
-    "@lattice/action": "workspace:*",
-    "@lattice/recipe": "workspace:*"
   }
 }
