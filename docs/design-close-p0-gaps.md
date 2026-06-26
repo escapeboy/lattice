@@ -43,3 +43,27 @@ Software-implementable + testable:
 ## Compounding
 
 One process to deploy; one audit log to certify (SOC2/GDPR story); personas that survive restarts; encrypted secrets. Each closed gap removes a "but does it actually…" objection from the dev/ops buyer.
+
+## Delivered (this sprint)
+
+All 13 in-scope items shipped with tests (189 total green):
+
+1. ✅ Multi-session HTTP transport (pool by `mcp-session-id`).
+2. ✅ Unified `LatticeCore` + `apps/serve`.
+3. ✅ Live theater wiring (gateway observer → control-plane `/sessions` + SSE).
+4. ✅ Control-plane operator-grant inbox + handoff routes (claim/approve/input).
+5. ✅ S4 scheduler on the real path (governor/budget via `RuntimeSchedulerImpl`).
+6. ✅ Persistent persona contexts (snapshot/restore cookies+storage per persona).
+7. ✅ Origin scoping on navigation (`kernel.checkNavigation`).
+8. ✅ Vault AES-256-GCM at rest + disk persistence.
+9. ✅ Svod trace auto-emission on teardown (injected writer; file by default).
+10. ✅ `perceive_subscribe` server-push delta streaming.
+11. ✅ Capability registry + WebMCP fast-path detection.
+12. ✅ Signature-verified handoff page + device OOB verification.
+13. ✅ Web replay viewer (perceive-vs-act-vs-gate timeline).
+
+## Documented as deployment infra (real code paths, ops-provisioned)
+
+- **Headful + Xvfb**: the engine already supports `headless:false`; Xvfb is a `DISPLAY` env on the host. Documented, not faked.
+- **Residential/mobile proxy per persona**: a per-context proxy is an engine launch arg + a proxy the operator runs; left as deployment config.
+- **WebRTC live-view fallback**: the mediated-field path (value→Vault→form) is the implemented primary; full live-view is a future surface.
