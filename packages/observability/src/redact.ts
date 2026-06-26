@@ -18,14 +18,7 @@
  * orthogonal to the kernel's quarantine guarantee.
  */
 
-import type {
-  SessionTrace,
-  TraceEvent,
-  SnapshotEvent,
-  ActionEvent,
-  ActionResultEvent,
-  NetworkEvent,
-} from "./types.js";
+import type { SessionTrace, TraceEvent } from "./types.js";
 import type { IGNode } from "@lattice/perception";
 import type { ActionCommand } from "@lattice/action";
 
@@ -150,30 +143,26 @@ function redactCommand(c: ActionCommand): ActionCommand {
 function redactEvent(e: TraceEvent, policy: PiiPolicy): TraceEvent {
   switch (e.kind) {
     case "snapshot": {
-      const ev = e as SnapshotEvent;
-      if (modeFor(policy, ev.url) === "full") return ev;
-      return { ...ev, url: redactString(ev.url), title: redactString(ev.title), nodes: ev.nodes.map(redactNode) };
+      if (modeFor(policy, e.url) === "full") return e;
+      return { ...e, url: redactString(e.url), title: redactString(e.title), nodes: e.nodes.map(redactNode) };
     }
     case "action": {
-      const ev = e as ActionEvent;
-      const url = ev.command.type === "navigate" ? ev.command.url : undefined;
-      if (modeFor(policy, url) === "full") return ev;
-      return { ...ev, command: redactCommand(ev.command) };
+      const url = e.command.type === "navigate" ? e.command.url : undefined;
+      if (modeFor(policy, url) === "full") return e;
+      return { ...e, command: redactCommand(e.command) };
     }
     case "action_result": {
-      const ev = e as ActionResultEvent;
-      if (modeFor(policy, ev.url) === "full") return ev;
+      if (modeFor(policy, e.url) === "full") return e;
       return {
-        ...ev,
-        url: redactString(ev.url),
-        ...(ev.extracted !== undefined ? { extracted: redactUnknown(ev.extracted) } : {}),
-        ...(ev.error !== undefined ? { error: redactString(ev.error) } : {}),
+        ...e,
+        url: redactString(e.url),
+        ...(e.extracted !== undefined ? { extracted: redactUnknown(e.extracted) } : {}),
+        ...(e.error !== undefined ? { error: redactString(e.error) } : {}),
       };
     }
     case "network": {
-      const ev = e as NetworkEvent;
-      if (modeFor(policy, ev.url) === "full") return ev;
-      return { ...ev, url: redactString(ev.url) };
+      if (modeFor(policy, e.url) === "full") return e;
+      return { ...e, url: redactString(e.url) };
     }
     default:
       return e;

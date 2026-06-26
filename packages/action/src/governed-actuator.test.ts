@@ -170,3 +170,37 @@ describe("GovernedActuator — kernel gating over the semantic engine", () => {
     expect(commands).not.toContain("connect");
   });
 });
+
+describe("GovernedActuator — per-origin rate limiting (P1.2)", () => {
+  it("navigate acquires a rate-limit slot BEFORE hitting the engine, and awaits it", async () => {
+    const kernel = createSecurityKernel({ allowedOrigins: [], egressAllowlist: [], prohibitedActions: [] });
+    const session = new FakeSession();
+    const events: string[] = [];
+    let release: (() => void) | undefined;
+    const rateLimiter = {
+      acquire: (url: string): Promise<void> => {
+        events.push(`acquire:${url}`);
+        return new Promise<void>((resolve) => {
+          release = () => {
+            events.push("released");
+            resolve();
+          };
+        });
+      },
+      report: (): void => undefined,
+    };
+    const limitedCtx = { origin: "", sessionId: "s1", rateLimiter };
+    const actuator = new GovernedActuator(session, kernel, anchor, limitedCtx);
+
+    const p = actuator.execute({ type: "navigate", url: "https://site.example/a" });
+    // The slot is requested, but navigation has NOT happened until acquire resolves.
+    await Promise.resolve();
+    expect(events).toEqual(["acquire:https://site.example/a"]);
+    expect(session.navs).toHaveLength(0);
+
+    release!();
+    await p;
+    expect(events).toEqual(["acquire:https://site.example/a", "released"]);
+    expect(session.navs).toEqual(["https://site.example/a"]);
+  });
+});

@@ -128,8 +128,9 @@ describe("redactTrace", () => {
 describe("emitToSvod — raw PII never reaches the Svod boundary", () => {
   it("the content handed to the writer contains no raw PII (default policy)", async () => {
     let persisted = "";
-    await emitToSvod(traceWithPii(), async (_path, content) => {
+    await emitToSvod(traceWithPii(), (_path, content) => {
       persisted = content;
+      return Promise.resolve();
     });
     for (const value of Object.values(RAW)) {
       expect(persisted, value).not.toContain(value);

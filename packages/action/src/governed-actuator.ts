@@ -32,10 +32,22 @@ export interface GovernedActionResult {
   readonly extracted?: string;
 }
 
+/**
+ * Per-origin throttle (P1.2). Structural port so the action package need not
+ * depend on @lattice/runtime; `OriginRateLimiter` satisfies it. Shared across
+ * sessions so a fan-out against one origin respects the limit collectively.
+ */
+export interface RateLimiterPort {
+  acquire(url: string): Promise<void>;
+  report(url: string, status: number): void;
+}
+
 export interface ActuatorContext {
   /** Origin the task is scoped to (for kernel classification/egress). */
   readonly origin: string;
   readonly sessionId: string;
+  /** Optional shared per-origin rate limiter; navigations acquire a slot first. */
+  readonly rateLimiter?: RateLimiterPort;
 }
 
 export class GovernedActuator {
@@ -53,6 +65,8 @@ export class GovernedActuator {
       if (!this.kernel.checkNavigation(command.url)) {
         throw new ActionError("navigation_interrupted", "re-perceive", `origin_out_of_scope: ${command.url}`);
       }
+      // Politeness: wait for a per-origin slot before hitting the site (P1.2).
+      await this.ctx.rateLimiter?.acquire(command.url);
       const res = await this.engine.navigate(command.url);
       return { ok: true, url: res.url };
     }

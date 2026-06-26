@@ -11,7 +11,8 @@ import type { SecurityKernel } from "@lattice/kernel";
 import type { SemanticEngine } from "@lattice/engine-adapter";
 import { TraceRecorder } from "@lattice/observability";
 import type { SessionTrace } from "@lattice/observability";
-import type { SnapshotData } from "@lattice/runtime";
+import type { SnapshotData, RateLimitConfig } from "@lattice/runtime";
+import { OriginRateLimiter } from "@lattice/runtime";
 import { BuildOnSession } from "./build-on-session.js";
 import { BuildOnContext } from "./build-on-context.js";
 import { BuildOnPerceptionAdapter, BuildOnActionAdapter } from "./build-on-engine.js";
@@ -23,6 +24,8 @@ export interface BuildOnRegistryOptions {
   origin?: string;
   /** Resource governor: max concurrent live sessions (S4). Default 50. */
   maxSessions?: number;
+  /** Per-origin politeness rate limit (P1.2). Off when omitted. */
+  rateLimit?: RateLimitConfig;
 }
 
 /** Thrown when the session governor's budget is exhausted. */
@@ -37,12 +40,21 @@ export class BuildOnSessionRegistry implements SessionProvider {
   private readonly sessions = new Map<string, GatewaySession>();
   /** Imported persona cookies, keyed by personaId (S8.5 persistence glue). */
   private readonly personaCookies = new Map<string, SnapshotData["cookies"]>();
+  /** Shared across sessions so a fan-out against one origin obeys the limit (P1.2). */
+  private readonly rateLimiter: OriginRateLimiter | undefined;
 
   constructor(
     private readonly engine: SemanticEngine,
     private readonly kernel: SecurityKernel,
     private readonly opts: BuildOnRegistryOptions = {},
-  ) {}
+  ) {
+    this.rateLimiter = opts.rateLimit ? new OriginRateLimiter(opts.rateLimit) : undefined;
+  }
+
+  /** The shared per-origin limiter, if configured — network paths report 429/503 here. */
+  get limiter(): OriginRateLimiter | undefined {
+    return this.rateLimiter;
+  }
 
   async create(topology: SessionTopology = "ephemeral", personaId?: string): Promise<GatewaySession> {
     const limit = this.opts.maxSessions ?? 50;
@@ -53,6 +65,7 @@ export class BuildOnSessionRegistry implements SessionProvider {
     const buildOn = new BuildOnSession(engineSession, this.kernel, {
       origin: this.opts.origin ?? "",
       sessionId: id,
+      ...(this.rateLimiter ? { rateLimiter: this.rateLimiter } : {}),
     });
     const perception = new BuildOnPerceptionAdapter(buildOn);
     const action = new BuildOnActionAdapter(buildOn, perception);

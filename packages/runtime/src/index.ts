@@ -14,6 +14,8 @@ export type {
 } from "./types.js";
 
 export { RuntimeSchedulerImpl } from "./scheduler.js";
+export { OriginRateLimiter } from "./rate-limiter.js";
+export type { RateLimitConfig } from "./rate-limiter.js";
 
 import type { EngineAdapter } from "@lattice/engine";
 import { RuntimeSchedulerImpl } from "./scheduler.js";
