@@ -18,6 +18,8 @@ public final class StackController: ObservableObject {
     }
 
     @Published public private(set) var state: StackState = .stopped
+    /// A connected MCP client, available once the stack is `.running`.
+    @Published public private(set) var client: MCPClient?
 
     public let gatewayPort: Int
     public let controlPlanePort: Int
@@ -54,16 +56,31 @@ public final class StackController: ObservableObject {
         let sup = Supervisor(config: config)
         sup.onState = { [weak self] s in
             // onState already hops to the main queue; assert into the main actor.
-            Task { @MainActor in self?.state = s }
+            Task { @MainActor in self?.handleState(s) }
         }
         supervisor = sup
         sup.start()
+    }
+
+    private func handleState(_ s: StackState) {
+        state = s
+        if case .running = s, client == nil {
+            // Connect a native MCP client for the control-plane views (D3/D4).
+            let c = MCPClient(endpoint: mcpURL, token: mcpToken)
+            Task { try? await c.connect() }
+            client = c
+        } else if case .running = s {
+            // already connected
+        } else {
+            client = nil
+        }
     }
 
     /// Tear the stack down cleanly (zero orphans). Safe to call on app quit.
     public func stopStack() {
         supervisor?.stop()
         supervisor = nil
+        client = nil
     }
 
     private func backendEnvironment(dataDir: URL) -> [String: String] {
