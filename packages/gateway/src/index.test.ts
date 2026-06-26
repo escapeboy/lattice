@@ -355,6 +355,33 @@ describeIfBrowser("GatewayServer — browser integration", () => {
     await client.callTool({ name: "session_destroy", arguments: { sessionId } });
   });
 
+  it("perceive_subscribe pushes a delta notification when the DOM changes", async () => {
+    const { sessionId } = JSON.parse(toolText(await client.callTool({ name: "session_create", arguments: {} }))) as { sessionId: string };
+    await client.callTool({ name: "act_execute", arguments: { sessionId, command: { type: "navigate", url: serverUrl } } });
+    await client.callTool({ name: "perceive_snapshot", arguments: { sessionId, tier: "L1" } }); // baseline
+
+    const received: Array<{ method: string }> = [];
+    client.fallbackNotificationHandler = (n) => { received.push(n); return Promise.resolve(); };
+
+    const { subscriptionId } = JSON.parse(toolText(await client.callTool({
+      name: "perceive_subscribe", arguments: { sessionId, intervalMs: 300 },
+    }))) as { subscriptionId: string };
+
+    // Mutate the DOM so the next poll yields a delta.
+    await client.callTool({ name: "act_execute", arguments: { sessionId, command: { type: "fill", target: { nodeId: "x" }, value: "y" } } }).catch(() => { /* fill may miss; force a real change below */ });
+    await client.callTool({ name: "act_execute", arguments: { sessionId, command: { type: "navigate", url: serverUrl + "?v=2" } } });
+
+    await new Promise((r) => setTimeout(r, 1200));
+    expect(received.some((n) => n.method === "notifications/perceive")).toBe(true);
+
+    const { unsubscribed } = JSON.parse(toolText(await client.callTool({
+      name: "perceive_unsubscribe", arguments: { sessionId, subscriptionId },
+    }))) as { unsubscribed: boolean };
+    expect(unsubscribed).toBe(true);
+
+    await client.callTool({ name: "session_destroy", arguments: { sessionId } });
+  });
+
   it("session.list shows active sessions", async () => {
     const { sessionId: s1id } = JSON.parse(toolText(await client.callTool({ name: "session_create", arguments: {} }))) as { sessionId: string };
     const { sessionId: s2id } = JSON.parse(toolText(await client.callTool({ name: "session_create", arguments: {} }))) as { sessionId: string };

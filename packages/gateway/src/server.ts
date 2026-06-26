@@ -98,6 +98,27 @@ const TOOLS = [
     },
   },
   {
+    name: "perceive_subscribe",
+    description: "Subscribe to live IG deltas: the gateway pushes a 'notifications/perceive' message whenever the page changes (no polling by the agent). Returns a subscriptionId.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        sessionId: { type: "string" },
+        intervalMs: { type: "number", default: 1000 },
+      },
+      required: ["sessionId"],
+    },
+  },
+  {
+    name: "perceive_unsubscribe",
+    description: "Stop a perceive_subscribe stream",
+    inputSchema: {
+      type: "object" as const,
+      properties: { sessionId: { type: "string" }, subscriptionId: { type: "string" } },
+      required: ["sessionId", "subscriptionId"],
+    },
+  },
+  {
     name: "act_execute",
     description: "Execute a semantic action on the page (navigate/act/fill/select/submit/scroll_to/wait_for)",
     inputSchema: {
@@ -496,9 +517,13 @@ export class GatewayServer {
     server.setRequestHandler(CallToolRequestSchema, async (req) => {
       const { name, arguments: args } = req.params;
       const a: Record<string, unknown> = args ?? {};
+      // Bind a server→client push for this connection (perceive_subscribe).
+      const notify = (params: Record<string, unknown>): void => {
+        void server.notification({ method: "notifications/perceive", params }).catch(() => { /* client gone */ });
+      };
 
       try {
-        return await this.dispatch(name, a);
+        return await this.dispatch(name, a, notify);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
       }
@@ -508,6 +533,7 @@ export class GatewayServer {
   private async dispatch(
     name: string,
     a: Record<string, unknown>,
+    notify?: (params: Record<string, unknown>) => void,
   ): Promise<ToolResult> {
     switch (name) {
       // ── session.* ──────────────────────────────────────────────────────────
@@ -589,6 +615,39 @@ export class GatewayServer {
         session.recorder.recordDelta(delta.added.length, delta.removed.length, delta.updated.length, current.url);
         session.lastSnapshot = current;
         return ok({ delta, url: current.url });
+      }
+
+      case "perceive_subscribe": {
+        const session = this.getSession(a["sessionId"] as string);
+        const intervalMs = Math.max(250, (a["intervalMs"] as number | undefined) ?? 1000);
+        const subId = randomUUID();
+        // Poll on a timer; push a notification whenever the IG actually changes.
+        const timer = setInterval(() => {
+          void (async () => {
+            try {
+              const current = (await session.perception.snapshot("L1")) as InteractionGraph;
+              if (session.lastSnapshot) {
+                const d = session.perception.delta(session.lastSnapshot, current);
+                if (d.added.length + d.removed.length + d.updated.length > 0) {
+                  session.recorder.recordDelta(d.added.length, d.removed.length, d.updated.length, current.url);
+                  notify?.({ subscriptionId: subId, sessionId: session.id, url: current.url, delta: d });
+                }
+              }
+              session.lastSnapshot = current;
+            } catch { /* page navigated/closed — next tick or unsubscribe */ }
+          })();
+        }, intervalMs);
+        if (typeof timer.unref === "function") timer.unref();
+        session.subscriptions.set(subId, () => clearInterval(timer));
+        return ok({ subscribed: true, subscriptionId: subId, intervalMs, channel: "notifications/perceive" });
+      }
+
+      case "perceive_unsubscribe": {
+        const session = this.getSession(a["sessionId"] as string);
+        const subId = a["subscriptionId"] as string;
+        const cleanup = session.subscriptions.get(subId);
+        if (cleanup) { cleanup(); session.subscriptions.delete(subId); }
+        return ok({ unsubscribed: cleanup !== undefined });
       }
 
       // ── act.* ──────────────────────────────────────────────────────────────
