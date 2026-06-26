@@ -28,3 +28,5 @@ export {
 export type { SynthNode, AppState, SynthStep } from "./synth.js";
 export { ATTACKS, runGovernanceEval, formatGovernanceReport } from "./governance.js";
 export type { Attack, AttackClass, GovernanceResult } from "./governance.js";
+export { runRecoveryEval, formatRecoveryReport } from "./recovery-eval.js";
+export type { RecoveryEvalResult, RecoveryRowResult } from "./recovery-eval.js";

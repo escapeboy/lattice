@@ -188,6 +188,9 @@ importers:
 
   packages/eval:
     dependencies:
+      '@lattice/action':
+        specifier: workspace:*
+        version: link:../action
       '@lattice/engine-adapter':
         specifier: workspace:*
         version: link:../engine-adapter

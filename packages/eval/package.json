@@ -23,6 +23,7 @@
   "dependencies": {
     "@lattice/perception": "workspace:*",
     "@lattice/engine-adapter": "workspace:*",
-    "@lattice/kernel": "workspace:*"
+    "@lattice/kernel": "workspace:*",
+    "@lattice/action": "workspace:*"
   }
 }

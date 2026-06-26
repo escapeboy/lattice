@@ -154,3 +154,40 @@ live("BuildOnSession — governed end-to-end over real agent-browser (S4/S6)", (
     expect(click.ok).toBe(true);
   });
 });
+
+describe("BuildOnSession — bounded failure recovery (P2.1)", () => {
+  it("re-anchors a target whose surrounding restructured, via the alt-locator rung", async () => {
+    const engine = new FakeEngine();
+    engine.tree = '- list "Items" [ref=e1]\n  - button "Save" [ref=e2]';
+    const session = new BuildOnSession(engine, kernel(), { origin: ORIGIN, sessionId: "s1" });
+
+    const ig = await session.perceive();
+    const save = [...ig.graph.nodes.values()].find((n) => n.label === "Save")!;
+
+    // The page restructures: Save is wrapped in a new listitem → its stable id
+    // changes, but role+label persist. Re-anchor (rung 1) misses; the alt-locator
+    // (rung 2) finds it.
+    engine.tree = '- list "Items" [ref=e1]\n  - listitem "Row" [ref=e2]\n    - button "Save" [ref=e3]';
+    const result = await session.recover({ nodeId: save.id, role: save.role, label: save.label }, "element_gone");
+    expect(result.outcome).toBe("resolved");
+    expect(result.rung).toBe("alt_locator");
+  });
+
+  it("hands off (once, bounded) when the target is gone and no escalation sees it", async () => {
+    const engine = new FakeEngine();
+    engine.tree = '- list "Items" [ref=e1]\n  - button "Save" [ref=e2]';
+    const session = new BuildOnSession(engine, kernel(), { origin: ORIGIN, sessionId: "s2" });
+    const ig = await session.perceive();
+    const save = [...ig.graph.nodes.values()].find((n) => n.label === "Save")!;
+
+    engine.tree = '- list "Items" [ref=e1]\n  - button "Cancel" [ref=e2]'; // Save gone
+    let handoffs = 0;
+    const result = await session.recover(
+      { nodeId: save.id, role: save.role, label: save.label },
+      "element_gone",
+      { handoff: () => { handoffs++; return Promise.resolve(); } },
+    );
+    expect(result.outcome).toBe("handoff");
+    expect(handoffs).toBe(1);
+  });
+});
