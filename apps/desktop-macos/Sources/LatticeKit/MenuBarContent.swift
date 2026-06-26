@@ -4,6 +4,7 @@ import SwiftUI
 /// supervisor (D2). Session list / theater / approvals land in D3–D4.
 public struct MenuBarContent: View {
     @ObservedObject private var stack: StackController
+    @Environment(\.openWindow) private var openWindow
 
     public init(stack: StackController) {
         self.stack = stack
@@ -28,6 +29,12 @@ public struct MenuBarContent: View {
 
             Divider()
 
+            Button("Open Control Plane…") {
+                openWindow(id: "control-plane")
+                NSApplication.shared.activate(ignoringOtherApps: true)
+            }
+            .disabled(!isRunning)
+
             Button("Quit Lattice") {
                 NSApplication.shared.terminate(nil)
             }
@@ -35,6 +42,11 @@ public struct MenuBarContent: View {
         }
         .padding(12)
         .frame(width: 240)
+    }
+
+    private var isRunning: Bool {
+        if case .running = stack.state { return true }
+        return false
     }
 
     private var statusText: String {

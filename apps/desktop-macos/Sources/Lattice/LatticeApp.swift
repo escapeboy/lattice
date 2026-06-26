@@ -16,6 +16,11 @@ struct LatticeApp: App {
             MenuBarContent(stack: stack)
         }
         .menuBarExtraStyle(.window)
+
+        Window("Lattice Control Plane", id: "control-plane") {
+            ControlPlaneRoot(stack: stack)
+        }
+        .defaultSize(width: 860, height: 580)
     }
 }
 
