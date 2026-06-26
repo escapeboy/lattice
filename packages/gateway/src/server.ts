@@ -24,6 +24,7 @@ import type { EngineAdapter } from "@lattice/engine";
 import type { FidelityTier, InteractionGraph } from "@lattice/perception";
 import type { GrantScope, OperatorRequest, SecurityKernel } from "@lattice/kernel";
 import { SessionRegistry } from "./sessions.js";
+import type { SessionProvider } from "./sessions.js";
 import { Vault } from "./vault.js";
 import { OperatorStore, type DeviceChannel, type PolicySnapshot } from "./operator.js";
 import { HandoffManager, NullTransport, type HandoffType, type NotificationTransport } from "./handoff.js";
@@ -408,7 +409,7 @@ function isInitialize(body: unknown): boolean {
 
 export class GatewayServer {
   private readonly mcp: Server;
-  private readonly sessions: SessionRegistry;
+  private readonly sessions: SessionProvider;
   private readonly vault: Vault;
   private readonly kernel: SecurityKernel;
   private readonly operatorStore: OperatorStore;
@@ -425,17 +426,27 @@ export class GatewayServer {
   private readonly maxMcpSessions = 256;
 
   constructor(
-    engine: EngineAdapter,
+    engine: EngineAdapter | null,
     kernel: SecurityKernel,
     opts?: {
       handoffTransport?: NotificationTransport;
       handoffSigningKey?: string;
       vault?: Vault;
       observer?: GatewayObserver;
+      /** Build-on (or any) session backend; defaults to the CDP SessionRegistry. */
+      sessionProvider?: SessionProvider;
     },
   ) {
     this.kernel = kernel;
-    this.sessions = new SessionRegistry(engine, kernel);
+    // Dual-stack: an injected provider (build-on) overrides the default CDP
+    // registry. The CDP path is byte-identical when no provider is given.
+    if (opts?.sessionProvider) {
+      this.sessions = opts.sessionProvider;
+    } else if (engine) {
+      this.sessions = new SessionRegistry(engine, kernel);
+    } else {
+      throw new Error("GatewayServer requires an engine or a sessionProvider");
+    }
     this.vault = opts?.vault ?? new Vault();
     this.operatorStore = new OperatorStore();
     this.notificationTransport = opts?.handoffTransport ?? new NullTransport();

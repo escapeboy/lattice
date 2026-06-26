@@ -32,6 +32,9 @@ class FakeSession implements EngineSession {
   readText(): Promise<string> {
     return Promise.resolve("page text");
   }
+  screenshot(): Promise<string> {
+    return Promise.resolve("BASE64PNG");
+  }
   act(action: SemanticAction): Promise<ActionResult> {
     this.acts.push(action);
     return Promise.resolve({ ok: this.nextActOk, url: "https://app.example.com/x", error: this.nextActError });

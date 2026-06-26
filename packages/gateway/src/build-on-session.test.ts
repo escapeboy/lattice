@@ -36,6 +36,9 @@ class FakeEngine implements EngineSession {
   readText(): Promise<string> {
     return Promise.resolve("text");
   }
+  screenshot(): Promise<string> {
+    return Promise.resolve("BASE64PNG");
+  }
   act(action: SemanticAction): Promise<ActionResult> {
     this.acts.push(action);
     return Promise.resolve({ ok: true, url: `${ORIGIN}/`, error: undefined });

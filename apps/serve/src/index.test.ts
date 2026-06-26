@@ -112,6 +112,72 @@ describe("LatticeCore — trace emission on teardown", () => {
   });
 });
 
+// ── Dual-stack engine selection (ADR 0002, no browser) ───────────────────────
+
+import type {
+  SemanticEngine,
+  EngineSession,
+  NavResult,
+  RawSnapshot,
+  ActionResult,
+} from "@lattice/engine-adapter";
+
+class FakeBuildOnEngine implements SemanticEngine, EngineSession {
+  readonly id = "lattice-fake" as EngineSession["id"];
+  launch(): Promise<void> {
+    return Promise.resolve();
+  }
+  createSession(): Promise<EngineSession> {
+    return Promise.resolve(this);
+  }
+  shutdown(): Promise<void> {
+    return Promise.resolve();
+  }
+  navigate(url: string): Promise<NavResult> {
+    return Promise.resolve({ url, title: "" });
+  }
+  currentUrl(): Promise<string> {
+    return Promise.resolve("https://x/");
+  }
+  snapshot(): Promise<RawSnapshot> {
+    return Promise.resolve({ url: "https://x/", refs: [], tree: '- button "Go" [ref=e1]' });
+  }
+  readText(): Promise<string> {
+    return Promise.resolve("t");
+  }
+  screenshot(): Promise<string> {
+    return Promise.resolve("B64");
+  }
+  act(): Promise<ActionResult> {
+    return Promise.resolve({ ok: true, url: "https://x/", error: undefined });
+  }
+  close(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+describe("LatticeCore — engineKind selection (ADR 0002)", () => {
+  it("engineKind 'agent-browser' boots the gateway on the build-on stack", async () => {
+    const kernel = new SecurityKernelImpl({ allowedOrigins: [], egressAllowlist: [], prohibitedActions: [] });
+    const core = createLatticeCore({ engineKind: "agent-browser", buildOnEngine: new FakeBuildOnEngine(), kernel });
+    const client = await connectGatewayClient(core);
+    try {
+      const { sessionId } = jsonOf(await client.callTool({ name: "session_create", arguments: {} })) as { sessionId: string };
+      const snap = jsonOf(await client.callTool({ name: "perceive_snapshot", arguments: { sessionId, tier: "L1" } }));
+      expect((snap["nodes"] as Array<{ role: string }>).map((n) => n.role)).toContain("button");
+    } finally {
+      await client.close();
+      await core.gateway.stop();
+    }
+  });
+
+  it("rejects a misconfigured core (kind without its engine)", () => {
+    const kernel = new SecurityKernelImpl({ allowedOrigins: [], egressAllowlist: [], prohibitedActions: [] });
+    expect(() => createLatticeCore({ engineKind: "agent-browser", kernel })).toThrow(/buildOnEngine/);
+    expect(() => createLatticeCore({ engineKind: "cdp", kernel })).toThrow(/engine/);
+  });
+});
+
 const exe = detectChromiumExecutable();
 const describeIfBrowser = exe ? describe : describe.skip;
 

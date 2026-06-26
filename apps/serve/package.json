@@ -21,6 +21,7 @@
   "dependencies": {
     "@lattice/control-plane": "workspace:*",
     "@lattice/engine": "workspace:*",
+    "@lattice/engine-adapter": "workspace:*",
     "@lattice/gateway": "workspace:*",
     "@lattice/kernel": "workspace:*",
     "@lattice/observability": "workspace:*"

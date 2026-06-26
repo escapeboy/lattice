@@ -8,8 +8,9 @@
  * and handoffs raised by the agent are resolvable from the control-plane UI.
  */
 
-import { createAgentGateway, type GatewayServer, type NotificationTransport, type Vault } from "@lattice/gateway";
+import { createAgentGateway, createBuildOnGateway, type GatewayObserver, type GatewayServer, type NotificationTransport, type Vault } from "@lattice/gateway";
 import type { EngineAdapter } from "@lattice/engine";
+import type { SemanticEngine } from "@lattice/engine-adapter";
 import type { SecurityKernel } from "@lattice/kernel";
 import { ControlPlaneServer } from "@lattice/control-plane";
 import { emitToSvod, type SvodWriteFn } from "@lattice/observability";
@@ -21,7 +22,12 @@ export interface LatticeCore {
 }
 
 export interface LatticeServeConfig {
-  engine: EngineAdapter;
+  /** Which engine backs the gateway sessions. Default "cdp" (the existing stack). */
+  engineKind?: "cdp" | "agent-browser";
+  /** Launched CDP engine (required for engineKind "cdp"). */
+  engine?: EngineAdapter;
+  /** Launched build-on engine (required for engineKind "agent-browser", ADR 0002). */
+  buildOnEngine?: SemanticEngine;
   kernel: SecurityKernel;
   handoffTransport?: NotificationTransport;
   handoffSigningKey?: string;
@@ -44,33 +50,45 @@ export function createLatticeCore(config: LatticeServeConfig): LatticeCore {
   // `ref.control`, which is filled in once the gateway exists.
   const ref: { control?: ControlPlaneServer } = {};
 
-  const gateway = createAgentGateway({
-    engine: config.engine,
+  const observer: GatewayObserver = {
+    onSession: (sessionId, view) => {
+      if (view === null) ref.control?.removeSession(sessionId);
+      else ref.control?.updateSession({
+        sessionId: view.sessionId,
+        url: view.url,
+        actionCount: view.actionCount,
+        ...(view.nodeCount !== undefined ? { nodeCount: view.nodeCount } : {}),
+        ...(view.lastSnapshotAt !== undefined ? { lastSnapshotAt: view.lastSnapshotAt } : {}),
+      });
+    },
+    onTrace: (trace) => {
+      ref.control?.submitTrace(trace);
+      // Best-effort emit to Svod (or a file writer); never block teardown.
+      if (config.traceWriter) {
+        void emitToSvod(trace, config.traceWriter).catch(() => { /* logged upstream */ });
+      }
+    },
+    onGrantRequest: (scope, summary) => ref.control?.requestOperatorGrant(scope, summary),
+  };
+
+  const shared = {
     kernel: config.kernel,
+    observer,
     ...(config.handoffTransport ? { handoffTransport: config.handoffTransport } : {}),
     ...(config.handoffSigningKey ? { handoffSigningKey: config.handoffSigningKey } : {}),
     ...(config.vault ? { vault: config.vault } : {}),
-    observer: {
-      onSession: (sessionId, view) => {
-        if (view === null) ref.control?.removeSession(sessionId);
-        else ref.control?.updateSession({
-          sessionId: view.sessionId,
-          url: view.url,
-          actionCount: view.actionCount,
-          ...(view.nodeCount !== undefined ? { nodeCount: view.nodeCount } : {}),
-          ...(view.lastSnapshotAt !== undefined ? { lastSnapshotAt: view.lastSnapshotAt } : {}),
-        });
-      },
-      onTrace: (trace) => {
-        ref.control?.submitTrace(trace);
-        // Best-effort emit to Svod (or a file writer); never block teardown.
-        if (config.traceWriter) {
-          void emitToSvod(trace, config.traceWriter).catch(() => { /* logged upstream */ });
-        }
-      },
-      onGrantRequest: (scope, summary) => ref.control?.requestOperatorGrant(scope, summary),
-    },
-  });
+  };
+
+  // Dual-stack engine selection (ADR 0002): the build-on path runs agent-browser
+  // behind the governed session; the default CDP path is unchanged.
+  let gateway: GatewayServer;
+  if (config.engineKind === "agent-browser") {
+    if (!config.buildOnEngine) throw new Error('engineKind "agent-browser" requires a launched buildOnEngine');
+    gateway = createBuildOnGateway({ engine: config.buildOnEngine, ...shared });
+  } else {
+    if (!config.engine) throw new Error('engineKind "cdp" requires a launched engine');
+    gateway = createAgentGateway({ engine: config.engine, ...shared });
+  }
 
   const control = new ControlPlaneServer(undefined, {
     kernel: config.kernel,

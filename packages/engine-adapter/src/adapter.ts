@@ -76,6 +76,18 @@ class AgentBrowserSession implements EngineSession {
     return str(env.data?.["content"]) ?? "";
   }
 
+  async screenshot(): Promise<string> {
+    // agent-browser writes the PNG to a temp path and returns it; we read that
+    // file (internal runtime output) and return base64. This is the engine's own
+    // artifact, NOT the firewalled `--allow-file-access` page-file surface.
+    const env = await this.runner.run(this.id, "screenshot", []);
+    fail(env, "screenshot");
+    const path = str(env.data?.["path"]);
+    if (!path) throw new Error("agent-browser screenshot returned no path");
+    const { readFileSync } = await import("node:fs");
+    return readFileSync(path).toString("base64");
+  }
+
   async act(action: SemanticAction): Promise<ActionResult> {
     const env = await this.dispatch(action);
     return {

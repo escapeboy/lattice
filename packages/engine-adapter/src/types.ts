@@ -88,6 +88,8 @@ export interface EngineSession {
   snapshot(opts?: SnapshotOpts): Promise<RawSnapshot>;
   /** Agent-readable text of the active page (L2 fidelity). */
   readText(): Promise<string>;
+  /** Viewport screenshot as base64-encoded PNG (L3 pixel tier). */
+  screenshot(): Promise<string>;
   act(action: SemanticAction): Promise<ActionResult>;
   close(): Promise<void>;
 }
