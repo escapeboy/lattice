@@ -260,6 +260,9 @@ importers:
       '@lattice/engine':
         specifier: workspace:*
         version: link:../engine
+      '@lattice/engine-adapter':
+        specifier: workspace:*
+        version: link:../engine-adapter
     devDependencies:
       '@types/node':
         specifier: 'catalog:'

@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@lattice/engine": "workspace:*"
+    "@lattice/engine": "workspace:*",
+    "@lattice/engine-adapter": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "catalog:",
