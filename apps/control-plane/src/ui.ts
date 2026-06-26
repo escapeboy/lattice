@@ -97,6 +97,7 @@ export function buildUI(serverOrigin: string): string {
 </header>
 
 <main>
+  <div id="minted"></div>
   <div class="intent">
     <input id="intent-input" placeholder="Dispatch an intent — e.g. &quot;log into the staging dashboard and export the weekly report&quot;" onkeydown="if(event.key==='Enter')sendIntent()">
     <button class="btn-pri" onclick="sendIntent()">Dispatch</button>
@@ -189,11 +190,20 @@ function renderGrants(){
 }
 async function approveGrant(id){
   var r=await post('/operator-grants/'+id+'/approve'); var o=r&&r.ok? await r.json():null;
-  if(o&&o.grant){ var c=document.getElementById('g-'+id);
-    if(c){ var d=document.createElement('div'); d.className='grant-token'; d.title='click to copy — relay this token to the agent';
-      d.textContent=o.grant; d.onclick=function(){ navigator.clipboard.writeText(o.grant); toast('Grant token copied'); };
-      c.querySelector('.actions').replaceWith(d); } }
+  if(o&&o.grant){ showMinted(o.grant); try{ navigator.clipboard.writeText(o.grant); toast('Grant approved — token copied to clipboard'); }catch(e){ toast('Grant approved'); } }
   loadGrants();
+}
+// A persistent banner for minted grant tokens (polling never wipes it).
+function showMinted(token){
+  var wrap=document.getElementById('minted');
+  var el=document.createElement('div'); el.className='card'; el.style.borderColor='var(--blue)'; el.style.marginBottom='14px';
+  el.innerHTML='<div class="row1"><span class="badge b-blue">grant minted</span>'+
+    '<span class="sub" style="margin-left:auto">relay this single-use token to the agent</span></div>'+
+    '<div class="grant-token" title="click to copy">'+esc(token)+'</div>';
+  el.querySelector('.grant-token').onclick=function(){ navigator.clipboard.writeText(token); toast('Copied'); };
+  var x=document.createElement('button'); x.className='btn-ghost'; x.textContent='Dismiss'; x.style.marginTop='8px';
+  x.onclick=function(){ el.remove(); }; el.appendChild(x);
+  wrap.prepend(el);
 }
 async function denyGrant(id){ await post('/operator-grants/'+id+'/deny',{reason:'denied'}); toast('Grant denied'); loadGrants(); }
 
