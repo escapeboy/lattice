@@ -168,6 +168,7 @@ export class AgentBrowserEngine implements SemanticEngine {
       this.runner = new AgentBrowserProcess({
         baseFlags: config.headed ? ["--headed"] : [],
         ...(this.timeoutMs !== undefined ? { timeoutMs: this.timeoutMs } : {}),
+        ...(config.proxyUrl ? { proxyUrl: config.proxyUrl } : {}),
       });
     }
     return Promise.resolve();

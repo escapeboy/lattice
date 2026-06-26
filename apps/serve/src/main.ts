@@ -20,6 +20,7 @@ import { createEngineAdapter, detectChromiumExecutable } from "@lattice/engine";
 import { AgentBrowserEngine } from "@lattice/engine-adapter";
 import { SecurityKernelImpl } from "@lattice/kernel";
 import { NtfyTransport, Vault } from "@lattice/gateway";
+import { EgressProxy, originAllowlist } from "@lattice/egress-proxy";
 import { createLatticeCore, resolveEngineKind } from "./index.js";
 
 function list(env: string | undefined): string[] {
@@ -44,6 +45,21 @@ async function main(): Promise<void> {
     );
   }
 
+  // Egress firewall (app-level): when an allowlist is configured, every browser
+  // request is routed through the Lattice egress proxy and gated per-request.
+  // An empty allowlist keeps the dev-unrestricted default (no proxy) — matching
+  // the kernel's empty-allowlist=unrestricted convention. Origin-level (the proxy
+  // sees the destination, not the initiating page); provenance stays kernel-level.
+  const allowedOrigins = list(process.env["LATTICE_ALLOWED_ORIGINS"]);
+  const egressAllow = list(process.env["LATTICE_EGRESS_ALLOWLIST"]);
+  let egressProxy: EgressProxy | undefined;
+  let proxyUrl: string | undefined;
+  if (allowedOrigins.length > 0 || egressAllow.length > 0) {
+    egressProxy = new EgressProxy({ allow: originAllowlist(allowedOrigins, egressAllow) });
+    proxyUrl = (await egressProxy.start()).url;
+    console.error(`Egress firewall active — browser traffic gated through ${proxyUrl} (origin allowlist).`);
+  }
+
   let cdpEngine: ReturnType<typeof createEngineAdapter> | undefined;
   let buildOnEngine: AgentBrowserEngine | undefined;
   if (engineKind === "agent-browser") {
@@ -51,6 +67,7 @@ async function main(): Promise<void> {
     await buildOnEngine.launch({
       headed: process.env["LATTICE_HEADED"] === "1",
       ...(process.env["LATTICE_DEVICE"] ? { device: process.env["LATTICE_DEVICE"] } : {}),
+      ...(proxyUrl ? { proxyUrl } : {}),
     });
   } else {
     const executablePath = detectChromiumExecutable();
@@ -118,6 +135,7 @@ async function main(): Promise<void> {
       await control.stop();
       await cdpEngine?.shutdown();
       await buildOnEngine?.shutdown();
+      await egressProxy?.stop();
       process.exit(0);
     })();
   };

@@ -61,6 +61,8 @@ export interface ProcessOptions {
   timeoutMs?: number;
   /** Override the binary path (tests). */
   binaryPath?: string;
+  /** Route the browser's egress through this forward proxy (Lattice egress firewall). */
+  proxyUrl?: string;
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000;
@@ -69,11 +71,13 @@ export class AgentBrowserProcess implements AbRunner {
   private readonly binary: string;
   private readonly baseFlags: readonly string[];
   private readonly timeoutMs: number;
+  private readonly proxyUrl: string | undefined;
 
   constructor(opts: ProcessOptions = {}) {
     this.binary = opts.binaryPath ?? resolveAgentBrowserBinary();
     this.baseFlags = opts.baseFlags ?? [];
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.proxyUrl = opts.proxyUrl;
   }
 
   async run(session: string, subcommand: string, args: readonly string[] = []): Promise<AbEnvelope> {
@@ -88,6 +92,12 @@ export class AgentBrowserProcess implements AbRunner {
     return new Promise((resolve, reject) => {
       const child = spawn(this.binary, argv as string[], {
         stdio: ["ignore", "pipe", "pipe"],
+        // Egress firewall: route the browser's traffic through the Lattice proxy.
+        // NO_PROXY for loopback keeps the agent-browser daemon's own control IPC
+        // (and any localhost target) off the proxy; real egress still goes through.
+        ...(this.proxyUrl
+          ? { env: { ...process.env, HTTP_PROXY: this.proxyUrl, HTTPS_PROXY: this.proxyUrl, NO_PROXY: "127.0.0.1,localhost" } }
+          : {}),
       });
       let out = "";
       let err = "";

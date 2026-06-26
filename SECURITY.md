@@ -94,14 +94,31 @@ See `packages/engine-adapter/src/firewall.test.ts`,
   scope each task to its origins so cross-origin wander is blocked too. (The
   scheme floor above holds either way.)
 
-### Egress firewall — required compensating control (network layer)
+### Egress firewall — app-level (the egress proxy)
 
-The kernel's egress firewall (`checkEgress`, content-provenance aware) is fully
-implemented but **not yet wired to the in-browser request path**: doing so needs
-network-level request interception in the engine (planned — see the governance
-note). Until that lands, the governance eval reports **18/20 wired on the default
-deployment**, with the `egress-exfil` class as the one residual. Close it at the
-infrastructure layer — this is a real, deployable mitigation **today**:
+The egress firewall is enforced on the real request path by
+**`@lattice/egress-proxy`**: agent-browser is launched with `HTTP(S)_PROXY`
+pointing at a Lattice forward proxy, so **every** browser request — fetch / XHR /
+img / beacon / form POST / navigation — passes through it and is gated
+**per-request** against the destination allowlist before any bytes leave (a live
+e2e proves a denied beacon is blocked and the attacker server is never reached).
+It is active when `LATTICE_ALLOWED_ORIGINS` / `LATTICE_EGRESS_ALLOWLIST` is set;
+an empty allowlist is the dev-unrestricted default.
+
+**Scope (honest):** the decision key is the **destination origin**. Over HTTPS
+CONNECT the proxy sees only `host:port`, not the initiating page, so this is a
+per-request **origin allowlist** — content-vs-task **provenance** (kernel A4) is
+not visible at this layer and stays a kernel-level property. Origin-level is the
+ceiling of the fork-free path; this is **not** a provenance-aware egress firewall.
+`agent-browser` stays internal-only — the proxy sits *around* the engine (only its
+exposed `--proxy`/`HTTP_PROXY` support is consumed), not a fork.
+
+### Egress firewall — defense-in-depth (network/infra layer)
+
+Independently, run the gateway behind an **outbound (egress) allowlist proxy** so
+a hostile page cannot exfiltrate even if the app-level proxy is bypassed. This is
+belt-and-suspenders with the app-level proxy above, and a deployable mitigation
+on its own:
 
 Run the gateway container behind an **outbound (egress) allowlist proxy** so a
 hostile page cannot exfiltrate data to an attacker origin even if it reaches the
