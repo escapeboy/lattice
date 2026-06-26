@@ -20,6 +20,13 @@ export interface EngineLaunchConfig {
   headed?: boolean;
   /** Emulate a device for every session (e.g. "iPhone 12") — S9 mobile sanity. */
   device?: string;
+  /**
+   * Route ALL browser egress through this forward proxy (the Lattice egress
+   * firewall). Set as HTTP(S)_PROXY for the agent-browser child, so every
+   * outbound request is gated before it leaves. agent-browser stays internal —
+   * the proxy is around the engine, not a fork.
+   */
+  proxyUrl?: string;
 }
 
 export interface NavResult {

@@ -100,6 +100,9 @@ importers:
       '@lattice/control-plane':
         specifier: workspace:*
         version: link:../control-plane
+      '@lattice/egress-proxy':
+        specifier: workspace:*
+        version: link:../../packages/egress-proxy
       '@lattice/engine':
         specifier: workspace:*
         version: link:../../packages/engine
@@ -144,6 +147,21 @@ importers:
         specifier: workspace:*
         version: link:../perception
     devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.20.0
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.6(@types/node@22.20.0)
+
+  packages/egress-proxy:
+    devDependencies:
+      '@lattice/engine-adapter':
+        specifier: workspace:*
+        version: link:../engine-adapter
       '@types/node':
         specifier: 'catalog:'
         version: 22.20.0

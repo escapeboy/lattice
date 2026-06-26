@@ -51,12 +51,12 @@ describe("governance eval — real kernel/firewall adjudication", () => {
     expect(text).toContain("block rate");
   });
 
-  it("DEFAULT-DEPLOYMENT view: egress-exfil is the unwired residual (18/20 wired)", () => {
+  it("DEFAULT-DEPLOYMENT view: egress now wired via the egress proxy (20/20 wired)", () => {
     const r = runGovernanceEval();
-    // Function-level: everything blocks. Default deployment: the egress firewall
-    // is unwired on form-submit, so it is NOT counted as enforced.
+    // The egress proxy gates browser requests on the real path (live e2e), so the
+    // egress-exfil class is now wired on the default deployment too.
     expect(r.latticeBlocked).toBe(r.total);
-    expect(r.defaultDeploymentBlocked).toBe(r.total - 2);
-    expect(r.unwiredOnDefault).toEqual(["exfil-form-to-attacker", "exfil-img-beacon"]);
+    expect(r.defaultDeploymentBlocked).toBe(r.total);
+    expect(r.unwiredOnDefault).toEqual([]);
   });
 });

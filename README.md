@@ -36,13 +36,20 @@ governance eval measure; see [`packages/eval`](./packages/eval).
 
 **Governance — measured.** The governance eval (a 20-attack injection/bypass
 corpus, adjudicated by the real kernel + firewall) reports **20/20 at the function
-level** and **18/20 wired on the default deployment**. The one residual class is
-`egress-exfil`: the kernel's egress firewall is implemented but not yet wired to
-the in-browser request path (app-level wiring is planned via network-request
-interception). It is mitigated **at the network/infra layer today** — run the
-gateway behind an outbound allowlist proxy; see [SECURITY.md](./SECURITY.md). The
+level** and **20/20 wired on the default deployment**. The egress-exfil class is
+enforced by the `@lattice/egress-proxy`: agent-browser runs behind a Lattice
+forward proxy, so every browser request — fetch / XHR / img / beacon / form POST —
+is gated per-request before it leaves (proven by a live e2e, not a mock). The
 default deployment is the firewalled build-on stack; the raw-CDP path is an
 explicit dev-only opt-in (`LATTICE_ENGINE=cdp`).
+
+> **Egress scope (honest):** the proxy enforces a per-request **destination
+> allowlist**. Over HTTPS CONNECT it sees `host:port`, not the page that
+> initiated the request, so it is **origin-level** — content-vs-task
+> **provenance** (kernel A4) is *not* available at this layer and stays a
+> kernel-level property. Origin-level is the ceiling of the fork-free path; this
+> is not a provenance-aware egress firewall. It is active when an egress/origin
+> allowlist is configured (an empty allowlist is the dev-unrestricted default).
 
 ## Architecture
 
@@ -56,6 +63,7 @@ A pnpm monorepo of focused packages:
 | `@lattice/action` | Semantic actions (`navigate`/`act`/`fill`/`select`/`submit`/`extract`/…) over **trusted** CDP Input, with engine-owned settling. |
 | `@lattice/runtime` | Scheduler + resource governor for N concurrent contexts; ephemeral/persistent topologies; fan-out. |
 | `@lattice/kernel` | Security kernel — content tainting, policy classification, capability gating, egress firewall, audit log. |
+| `@lattice/egress-proxy` | App-level egress firewall: a forward proxy agent-browser runs behind (`HTTP_PROXY`), gating every browser request per-origin before it leaves. |
 | `@lattice/gateway` | MCP server (stdio **and** Streamable HTTP). Tool groups: `session.*` `perceive.*` `act.*` `extract.*` `capability.*` `vault.*` `policy.*`. |
 | `@lattice/observability` | Structured, diffable traces; deterministic replay; metrics; Svod emission. |
 | `@lattice/sdk-ts` | Thin TypeScript client. |

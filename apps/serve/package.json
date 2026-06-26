@@ -24,7 +24,8 @@
     "@lattice/engine-adapter": "workspace:*",
     "@lattice/gateway": "workspace:*",
     "@lattice/kernel": "workspace:*",
-    "@lattice/observability": "workspace:*"
+    "@lattice/observability": "workspace:*",
+    "@lattice/egress-proxy": "workspace:*"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

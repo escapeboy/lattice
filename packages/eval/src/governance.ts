@@ -150,7 +150,10 @@ export const ATTACKS: ReadonlyArray<Attack> = [
       const k = freshKernel();
       return !k.checkEgress({ destination: "https://attacker.example/collect", sourceOrigin: "page-content", taskOrigin: TASK_ORIGIN, sessionId: "s1" });
     },
-    wiredOnDefault: false, // checkEgress blocks, but it has no caller on the form-submit path (needs engine form-action exposure — A3)
+    // WIRED: the @lattice/egress-proxy gates every browser request per-origin on
+    // the real agent path (live e2e proven). Origin-level (the proxy sees the
+    // destination, not the initiating page); provenance stays kernel-level.
+    wiredOnDefault: true,
     hardenedBlocks: false,
     hardenedReason: "network routing is not content-origin-aware; no allowlist keyed to the task origin by default",
   },
@@ -162,7 +165,7 @@ export const ATTACKS: ReadonlyArray<Attack> = [
       const k = freshKernel();
       return !k.checkEgress({ destination: "https://evil.example/p?d=secret", sourceOrigin: "page-content", taskOrigin: TASK_ORIGIN, sessionId: "s1" });
     },
-    wiredOnDefault: false, // same — checkEgress is unwired on the form-submit/beacon path (A3)
+    wiredOnDefault: true, // gated by the egress proxy on the real path (live e2e); origin-level
     hardenedBlocks: false,
     hardenedReason: "no egress firewall classifying content-proposed destinations",
   },
