@@ -18,6 +18,8 @@ export type EngineSessionId = string & { readonly __brand: "EngineSessionId" };
 export interface EngineLaunchConfig {
   /** Run with a visible window (headful + Xvfb on servers; S8.5 persona hardening). */
   headed?: boolean;
+  /** Emulate a device for every session (e.g. "iPhone 12") — S9 mobile sanity. */
+  device?: string;
 }
 
 export interface NavResult {

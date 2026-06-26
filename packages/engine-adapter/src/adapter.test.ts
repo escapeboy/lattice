@@ -148,8 +148,15 @@ describe("AgentBrowserEngine — command mapping", () => {
     expect(closed.sort()).toEqual([session.id, s2.id].sort());
   });
 
-  it("createSession before launch throws", () => {
+  it("createSession before launch throws", async () => {
     const engine = new AgentBrowserEngine({ runner });
-    expect(() => engine.createSession()).toThrow(/not launched/);
+    await expect(engine.createSession()).rejects.toThrow(/not launched/);
+  });
+
+  it("device emulation (S9): launch({device}) applies `set device` per session", async () => {
+    const engine = new AgentBrowserEngine({ runner });
+    await engine.launch({ device: "iPhone 12" });
+    await engine.createSession();
+    expect(runner.calls.some((c) => c.subcommand === "set" && c.args.join(" ") === "device iPhone 12")).toBe(true);
   });
 });

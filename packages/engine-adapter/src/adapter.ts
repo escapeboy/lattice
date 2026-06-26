@@ -153,6 +153,7 @@ export class AgentBrowserEngine implements SemanticEngine {
   private readonly injected: AbRunner | undefined;
   private readonly timeoutMs: number | undefined;
   private readonly sessions = new Set<string>();
+  private device: string | undefined;
 
   constructor(opts: AgentBrowserEngineOptions = {}) {
     this.injected = opts.runner;
@@ -160,6 +161,7 @@ export class AgentBrowserEngine implements SemanticEngine {
   }
 
   launch(config: EngineLaunchConfig = {}): Promise<void> {
+    this.device = config.device;
     if (this.injected) {
       this.runner = this.injected;
     } else {
@@ -171,13 +173,16 @@ export class AgentBrowserEngine implements SemanticEngine {
     return Promise.resolve();
   }
 
-  createSession(): Promise<EngineSession> {
+  async createSession(): Promise<EngineSession> {
     if (!this.runner) throw new Error("Engine not launched; call launch() first.");
     // Private, unguessable session name → the internal-only boundary. Nothing
     // outside this process knows it, and no port is opened for it.
     const id = `lattice-${randomUUID()}`;
     this.sessions.add(id);
-    return Promise.resolve(new AgentBrowserSession(this.runner, id));
+    // Apply device emulation for the session (S9 mobile). `set` is a benign
+    // emulation setting, not a firewalled primitive.
+    if (this.device) await this.runner.run(id, "set", ["device", this.device]);
+    return new AgentBrowserSession(this.runner, id);
   }
 
   async shutdown(): Promise<void> {

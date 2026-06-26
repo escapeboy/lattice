@@ -24,8 +24,10 @@ export { BuildOnSession } from "./build-on-session.js";
 export type { BuildOnSessionContext } from "./build-on-session.js";
 export { BuildOnPerceptionAdapter, BuildOnActionAdapter } from "./build-on-engine.js";
 export { BuildOnContext } from "./build-on-context.js";
-export { BuildOnSessionRegistry } from "./build-on-registry.js";
+export { BuildOnSessionRegistry, SessionBudgetError } from "./build-on-registry.js";
 export type { BuildOnRegistryOptions } from "./build-on-registry.js";
+export { fanOut } from "./build-on-fanout.js";
+export type { FanOutResult } from "./build-on-fanout.js";
 export { OperatorStore } from "./operator.js";
 export type { DeviceRecord, PersonaRecord, PolicySnapshot } from "./operator.js";
 export {

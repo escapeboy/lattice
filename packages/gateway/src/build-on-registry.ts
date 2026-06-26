@@ -21,6 +21,16 @@ import { randomUUID } from "node:crypto";
 export interface BuildOnRegistryOptions {
   /** Task origin scope for the governed session (default: unrestricted dev). */
   origin?: string;
+  /** Resource governor: max concurrent live sessions (S4). Default 50. */
+  maxSessions?: number;
+}
+
+/** Thrown when the session governor's budget is exhausted. */
+export class SessionBudgetError extends Error {
+  constructor(limit: number) {
+    super(`session_budget_exceeded: at the ${limit}-session governor cap`);
+    this.name = "SessionBudgetError";
+  }
 }
 
 export class BuildOnSessionRegistry implements SessionProvider {
@@ -35,6 +45,8 @@ export class BuildOnSessionRegistry implements SessionProvider {
   ) {}
 
   async create(topology: SessionTopology = "ephemeral", personaId?: string): Promise<GatewaySession> {
+    const limit = this.opts.maxSessions ?? 50;
+    if (this.sessions.size >= limit) throw new SessionBudgetError(limit);
     const id = randomUUID();
     const engineSession = await this.engine.createSession();
     const context = new BuildOnContext(engineSession);

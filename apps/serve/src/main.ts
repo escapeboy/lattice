@@ -37,7 +37,10 @@ async function main(): Promise<void> {
   let buildOnEngine: AgentBrowserEngine | undefined;
   if (engineKind === "agent-browser") {
     buildOnEngine = new AgentBrowserEngine();
-    await buildOnEngine.launch({ headed: process.env["LATTICE_HEADED"] === "1" });
+    await buildOnEngine.launch({
+      headed: process.env["LATTICE_HEADED"] === "1",
+      ...(process.env["LATTICE_DEVICE"] ? { device: process.env["LATTICE_DEVICE"] } : {}),
+    });
   } else {
     const executablePath = detectChromiumExecutable();
     if (!executablePath) {
