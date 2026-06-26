@@ -13,7 +13,7 @@ import type { EngineAdapter } from "@lattice/engine";
 import type { SemanticEngine } from "@lattice/engine-adapter";
 import type { SecurityKernel } from "@lattice/kernel";
 import { ControlPlaneServer } from "@lattice/control-plane";
-import { emitToSvod, type SvodWriteFn } from "@lattice/observability";
+import { emitToSvod, type SvodWriteFn, type PiiPolicy } from "@lattice/observability";
 import { importChromeCookies } from "./chrome-import.js";
 
 export interface LatticeCore {
@@ -34,6 +34,8 @@ export interface LatticeServeConfig {
   vault?: Vault;
   /** Where finished traces are emitted (Svod note). File writer by default. */
   traceWriter?: SvodWriteFn;
+  /** PII redaction policy applied before traces persist to Svod (P1.1). Redacted by default. */
+  piiPolicy?: PiiPolicy;
   /** Bearer token required on the control plane's state-changing routes. */
   controlPlaneToken?: string;
 }
@@ -64,8 +66,10 @@ export function createLatticeCore(config: LatticeServeConfig): LatticeCore {
     onTrace: (trace) => {
       ref.control?.submitTrace(trace);
       // Best-effort emit to Svod (or a file writer); never block teardown.
+      // PII is redacted at this boundary before the immutable store (P1.1);
+      // the full-fidelity trace above stays in the human-side control plane.
       if (config.traceWriter) {
-        void emitToSvod(trace, config.traceWriter).catch(() => { /* logged upstream */ });
+        void emitToSvod(trace, config.traceWriter, undefined, config.piiPolicy).catch(() => { /* logged upstream */ });
       }
     },
     onGrantRequest: (scope, summary) => ref.control?.requestOperatorGrant(scope, summary),

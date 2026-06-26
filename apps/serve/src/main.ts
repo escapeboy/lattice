@@ -10,6 +10,7 @@
  *   LATTICE_ALLOWED_ORIGINS / LATTICE_EGRESS_ALLOWLIST / LATTICE_PROHIBITED
  *   LATTICE_NTFY_BASE / LATTICE_HANDOFF_KEY   handoff push + signing
  *   LATTICE_VAULT_KEY / LATTICE_VAULT_PATH    vault encryption + persistence
+ *   LATTICE_PII_FULL_ORIGINS  origins to log in full (default: all redacted)
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
@@ -72,6 +73,14 @@ async function main(): Promise<void> {
   };
 
   const cpToken = process.env["LATTICE_CP_TOKEN"];
+  // PII redaction policy (P1.1): traces are redacted before Svod by default.
+  // LATTICE_PII_FULL_ORIGINS lists origins to log in full (trusted internal).
+  const piiFullOrigins = list(process.env["LATTICE_PII_FULL_ORIGINS"]);
+  const piiPolicy =
+    piiFullOrigins.length > 0
+      ? { defaultMode: "redacted" as const, perOrigin: Object.fromEntries(piiFullOrigins.map((o) => [o, "full" as const])) }
+      : undefined;
+
   const { gateway, control } = createLatticeCore({
     engineKind,
     ...(cdpEngine ? { engine: cdpEngine } : {}),
@@ -79,6 +88,7 @@ async function main(): Promise<void> {
     kernel,
     vault: new Vault(vaultKey, vaultPath),
     traceWriter,
+    ...(piiPolicy ? { piiPolicy } : {}),
     ...(ntfyBase ? { handoffTransport: new NtfyTransport(ntfyBase) } : {}),
     ...(handoffKey ? { handoffSigningKey: handoffKey } : {}),
     ...(cpToken ? { controlPlaneToken: cpToken } : {}),

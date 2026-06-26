@@ -21,6 +21,8 @@ services:
       LATTICE_ALLOWED_ORIGINS: "${LATTICE_ALLOWED_ORIGINS:-}"
       LATTICE_EGRESS_ALLOWLIST: "${LATTICE_EGRESS_ALLOWLIST:-}"
       LATTICE_PROHIBITED: "${LATTICE_PROHIBITED:-captcha,account.create,hard_delete,payment,transfer}"
+      # PII in traces is redacted before Svod by default; list origins to log in full.
+      LATTICE_PII_FULL_ORIGINS: "${LATTICE_PII_FULL_ORIGINS:-}"
     # Headless Chromium needs a larger shared-memory segment than the 64MB default.
     shm_size: "1gb"
     restart: unless-stopped
