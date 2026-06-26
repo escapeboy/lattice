@@ -80,4 +80,8 @@ export interface ControlPlaneBackend {
   setBudget(limitTokens: number): void;
   /** Human-initiated persona import from a real browser profile (credential-bearing). */
   importPersona(personaId: string, profile: string, origins: string[]): Promise<{ imported: number; origins: string[] }>;
+  /** Operator read surface: known personas (id + origins + live sessions). No values. */
+  listPersonas(): Array<{ personaId: string; origins: string[]; sessions: number }>;
+  /** Operator read surface: vault entries as id/origin/label ONLY — never credentials. */
+  listVault(): Array<{ id: string; origin: string; label: string }>;
 }

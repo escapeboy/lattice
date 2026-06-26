@@ -561,6 +561,16 @@ export class GatewayServer {
     return n;
   }
 
+  /** Operator read surface (S8.5): known personas (id + cookie origins + live sessions). No values. */
+  listPersonas(): ReturnType<SessionProvider["listPersonas"]> {
+    return this.sessions.listPersonas();
+  }
+
+  /** Operator read surface: vault entries as id/origin/label ONLY — never username/password. */
+  listVaultEntries(): Array<{ id: string; origin: string; label: string }> {
+    return this.vault.listPublic().map((e) => ({ id: e.id, origin: e.origin, label: e.label }));
+  }
+
   /**
    * Control-plane seam: fulfil a Type B (input) handoff by writing the value
    * into the claimed session's field. The value flows here → form and is never

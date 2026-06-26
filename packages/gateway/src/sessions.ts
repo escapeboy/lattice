@@ -20,6 +20,13 @@ export type SessionTopology = "ephemeral" | "persistent";
  * the build-on registry (ADR 0002) implement it, so the server drives either
  * engine unchanged (dual-stack).
  */
+/** Operator read surface: a persona's identity + scope, never its stored state/values. */
+export interface PersonaInfo {
+  personaId: string;
+  origins: string[];
+  sessions: number;
+}
+
 export interface SessionProvider {
   create(topology?: SessionTopology, personaId?: string): Promise<GatewaySession>;
   get(id: string): GatewaySession | undefined;
@@ -27,6 +34,8 @@ export interface SessionProvider {
   list(): string[];
   activeCount(): number;
   importPersona(personaId: string, cookies: SnapshotData["cookies"]): number;
+  /** Known personas (imported state + live persistent sessions). Read-only, no values. */
+  listPersonas(): PersonaInfo[];
   destroyAll(): Promise<void>;
 }
 
@@ -144,6 +153,19 @@ export class SessionRegistry implements SessionProvider {
     };
     this.personaState.set(personaId, merged);
     return cookies.length;
+  }
+
+  listPersonas(): PersonaInfo[] {
+    const ids = new Set<string>(this.personaState.keys());
+    const live = new Map<string, number>();
+    for (const s of this.sessions.values()) {
+      if (s.personaId) { ids.add(s.personaId); live.set(s.personaId, (live.get(s.personaId) ?? 0) + 1); }
+    }
+    return Array.from(ids).map((personaId) => {
+      const cookies = this.personaState.get(personaId)?.cookies ?? [];
+      const origins = Array.from(new Set(cookies.map((c) => c.domain).filter((d): d is string => !!d)));
+      return { personaId, origins, sessions: live.get(personaId) ?? 0 };
+    });
   }
 
   async destroyAll(): Promise<void> {
