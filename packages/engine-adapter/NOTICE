@@ -1,0 +1,18 @@
+Lattice engine-adapter
+Copyright 2026 Lattice
+
+This package builds on (does not modify) agent-browser:
+
+  agent-browser — https://agent-browser.dev
+  Source: https://github.com/vercel-labs/agent-browser
+  License: Apache License 2.0
+  Pinned version: 0.31.0
+
+agent-browser is used unmodified as an internal engine, invoked as a child
+process behind the Lattice engine-adapter. Per ADR 0002, the agent-browser
+daemon/CLI is internal-only and never directly reachable by an agent; its
+kernel-bypassing primitives (eval, raw CDP/connect, file access, profile/state
+import) are firewalled at the Lattice layer.
+
+A copy of the Apache License 2.0 is available at:
+  https://www.apache.org/licenses/LICENSE-2.0
