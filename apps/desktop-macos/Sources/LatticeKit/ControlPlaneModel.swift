@@ -10,15 +10,26 @@ public final class ControlPlaneModel: ObservableObject {
     @Published public private(set) var sessions: [SessionView] = []
     @Published public private(set) var approvals: [Approval] = []
     @Published public private(set) var traces: [TraceSummary] = []
+    @Published public private(set) var personas: [Persona] = []
+    @Published public private(set) var vault: [VaultEntry] = []
+    @Published public private(set) var handoffs: [Handoff] = []
     @Published public var policy: Policy?
     @Published public private(set) var lastError: String?
     @Published public private(set) var connected = false
 
     private let client: ControlPlaneClient
+    private let notifier: HandoffNotifier?
     private var pollTask: Task<Void, Never>?
 
-    public init(client: ControlPlaneClient) {
+    public init(client: ControlPlaneClient, notifier: HandoffNotifier? = nil) {
         self.client = client
+        self.notifier = notifier
+        notifier?.attach(client: client)
+    }
+
+    /// Trace event timeline (native replay detail).
+    public func replayEvents(_ traceId: String) async -> [TraceEventRow] {
+        (try? await client.replayEvents(traceId)) ?? []
     }
 
     public func start() {
@@ -41,9 +52,16 @@ public final class ControlPlaneModel: ObservableObject {
             async let s = client.sessions()
             async let a = client.approvals()
             async let t = client.traces()
+            async let p = client.personas()
+            async let v = client.vault()
+            async let h = client.handoffs()
             sessions = try await s
             approvals = try await a
             traces = try await t.sorted { $0.recordedAt > $1.recordedAt }
+            personas = try await p
+            vault = try await v
+            handoffs = try await h
+            notifier?.sync(handoffs: handoffs)
             if policy == nil { policy = try await client.policy() }
             connected = true
             lastError = nil

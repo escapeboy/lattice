@@ -26,6 +26,8 @@ public final class StackController: ObservableObject {
     public let host = "127.0.0.1"
     public let mcpToken = UUID().uuidString
     public let cpToken = UUID().uuidString
+    /// Native handoff → notification bridge (configured at app launch).
+    public let handoffNotifier = HandoffNotifier()
 
     private var supervisor: Supervisor?
 
@@ -91,10 +93,15 @@ public final class StackController: ObservableObject {
             "LATTICE_MCP_TOKEN": mcpToken,
             "LATTICE_CP_TOKEN": cpToken,
             "LATTICE_TRACE_DIR": dataDir.appendingPathComponent("traces").path,
-            // Vault persistence requires a 64-hex LATTICE_VAULT_KEY, which lives
-            // in the macOS Keychain — wired in D5. Until then the vault is
-            // ephemeral (no LATTICE_VAULT_PATH), so the stack boots clean.
         ]
+        // Vault → Keychain (D5): the 64-hex encryption key lives in the macOS
+        // Keychain; the vault file is encrypted with it and persists across runs.
+        // If the Keychain is unavailable, fall back to an ephemeral vault (no
+        // LATTICE_VAULT_PATH) so the stack still boots.
+        if let vaultKey = KeychainStore.getOrCreateHexKey("vault-key") {
+            env["LATTICE_VAULT_KEY"] = vaultKey
+            env["LATTICE_VAULT_PATH"] = dataDir.appendingPathComponent("vault.json").path
+        }
         // Desktop egress posture (D6) is layered in later; D2 just boots the stack.
         env.merge(DesktopEgress.environment()) { _, new in new }
         return env

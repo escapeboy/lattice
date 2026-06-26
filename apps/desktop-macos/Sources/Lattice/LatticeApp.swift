@@ -34,6 +34,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installSignalTeardown(for: [SIGTERM, SIGINT])
+        StackController.shared.handoffNotifier.configure()
         StackController.shared.startStack()
     }
 

@@ -55,7 +55,7 @@ public struct ControlPlaneRoot: View {
             if case .running = stack.state {
                 if model == nil {
                     let client = ControlPlaneClient(baseURL: stack.controlPlaneURL, token: stack.cpToken)
-                    let m = ControlPlaneModel(client: client)
+                    let m = ControlPlaneModel(client: client, notifier: stack.handoffNotifier)
                     m.start()
                     model = m
                 }
@@ -95,7 +95,7 @@ public struct ControlPlaneView: View {
         case .approvals: ApprovalsView(model: model)
         case .policy: PolicyView(model: model)
         case .replay: ReplayView(model: model)
-        case .personas: PersonasView()
+        case .personas: PersonasView(model: model)
         }
     }
 

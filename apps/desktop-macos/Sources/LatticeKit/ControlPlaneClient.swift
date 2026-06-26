@@ -42,6 +42,37 @@ public struct TraceSummary: Codable, Sendable, Identifiable {
     public var id: String { traceId }
 }
 
+public struct Persona: Codable, Sendable, Identifiable {
+    public let personaId: String
+    public let origins: [String]
+    public let sessions: Int
+    public var id: String { personaId }
+}
+
+public struct VaultEntry: Codable, Sendable, Identifiable {
+    public let id: String
+    public let origin: String
+    public let label: String
+}
+
+public struct Handoff: Codable, Sendable, Identifiable {
+    public let id: String
+    public let type: String
+    public let origin: String
+    public let reason: String
+    public let field: String?
+    public let status: String
+    public let createdAt: Double
+}
+
+public struct TraceEventRow: Codable, Sendable, Identifiable {
+    public let lane: String
+    public let cls: String
+    public let text: String
+    public let rel: Double
+    public var id: String { "\(rel)-\(text)" }
+}
+
 /// Native client for the control-plane HTTP API (ADR 0003 D4). Mutating routes
 /// and the PII `/replay` reads carry the control-plane bearer token; plain GETs
 /// are open (matching the server's auth model).
@@ -85,6 +116,35 @@ public struct ControlPlaneClient: Sendable {
     /// Replay trace ids (PII read — token required).
     public func replayList() async throws -> [String] {
         try await get("/replay", "traces")
+    }
+    /// Redacted event timeline for one trace (native replay detail).
+    public func replayEvents(_ traceId: String) async throws -> [TraceEventRow] {
+        let (data, _) = try await send("GET", "/replay/\(traceId)/events", body: nil)
+        let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        guard let arr = obj?["events"] else { return [] }
+        let sub = try JSONSerialization.data(withJSONObject: arr)
+        return try JSONDecoder().decode([TraceEventRow].self, from: sub)
+    }
+    public func personas() async throws -> [Persona] {
+        try await get("/personas", "personas")
+    }
+    public func vault() async throws -> [VaultEntry] {
+        try await get("/vault", "vault")
+    }
+    public func handoffs() async throws -> [Handoff] {
+        try await get("/handoffs", "handoffs")
+    }
+    /// Claim a handoff for this device (first claim wins).
+    public func claimHandoff(_ id: String, deviceId: String) async throws -> Bool {
+        let body = try JSONSerialization.data(withJSONObject: ["deviceId": deviceId])
+        let (data, _) = try await send("POST", "/handoff/\(id)/claim", body: body)
+        return ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["claimed"] as? Bool ?? false
+    }
+    /// Resolve an approval handoff (approve/deny) for a claimed device.
+    public func resolveHandoff(_ id: String, deviceId: String, approved: Bool) async throws -> Bool {
+        let body = try JSONSerialization.data(withJSONObject: ["deviceId": deviceId, "approved": approved])
+        let (data, _) = try await send("POST", "/handoff/\(id)/approve", body: body)
+        return ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["resolved"] as? Bool ?? false
     }
 
     // MARK: plumbing
