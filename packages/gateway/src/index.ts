@@ -17,6 +17,8 @@ export type { GatewayObserver, SessionViewEvent } from "./server.js";
 export { Vault } from "./vault.js";
 export { SessionRegistry } from "./sessions.js";
 export type { GatewaySession } from "./sessions.js";
+export { BuildOnSession } from "./build-on-session.js";
+export type { BuildOnSessionContext } from "./build-on-session.js";
 export { OperatorStore } from "./operator.js";
 export type { DeviceRecord, PersonaRecord, PolicySnapshot } from "./operator.js";
 export {
