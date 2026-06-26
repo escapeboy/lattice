@@ -30,9 +30,13 @@ accessibility snapshot, so on raw perception tokens for a single page the two ar
 in the same order of magnitude (Lattice builds *on* agent-browser — see ADR 0002).
 Against a semantic engine the Lattice differentiator is **not** the token count —
 it is **governance** (tainting, capability gating, egress firewall, constitutional
-floor), **cross-mutation stable identity** (reliability across re-renders), and
-**streamed deltas** over multi-step flows. Those are what the eval harness and the
-governance eval measure; see [`packages/eval`](./packages/eval).
+floor), **cross-mutation stable identity** (reliability across re-renders),
+**streamed deltas** over multi-step flows, and a **per-domain recipe library**
+(`@lattice/recipe`) that, on a known flow, cuts planning tokens **669 → 105
+(0.157×)** and per-step model round-trips **5 → 1**, and holds success under drift
+**80% → 100%** versus a naive baked-locator recipe — while still routing every step
+through the gate. Those are what the eval harness and the governance eval measure;
+see [`packages/eval`](./packages/eval).
 
 **Governance — measured.** The governance eval (a 20-attack injection/bypass
 corpus, adjudicated by the real kernel + firewall) reports **20/20 at the function
@@ -61,6 +65,7 @@ A pnpm monorepo of focused packages:
 | `@lattice/engine-adapter` | **Build-on engine (ADR 0002):** [agent-browser](https://agent-browser.dev) wrapped behind a narrow semantic port, **internal-only**, with the kernel-bypass primitives (`eval`/raw-CDP/file/profile) firewalled. See [SECURITY.md](./SECURITY.md). |
 | `@lattice/perception` | Interaction Graph from DOM + Accessibility tree + layout. Stable node identity, fidelity tiers **L0/L1/L2/L3**, deltas. |
 | `@lattice/action` | Semantic actions (`navigate`/`act`/`fill`/`select`/`submit`/`extract`/…) over **trusted** CDP Input, with engine-owned settling. |
+| `@lattice/recipe` | Per-domain **declarative** recipes (capability packs): versioned, applied instead of rediscovering a known flow; resolved against the live IG and run through the **same governed actuator** (a recipe shortcuts perception/planning, not gating), with graceful fallback on drift. |
 | `@lattice/runtime` | Scheduler + resource governor for N concurrent contexts; ephemeral/persistent topologies; fan-out. |
 | `@lattice/kernel` | Security kernel — content tainting, policy classification, capability gating, egress firewall, audit log. |
 | `@lattice/egress-proxy` | App-level egress firewall: a forward proxy agent-browser runs behind (`HTTP_PROXY`), gating every browser request per-origin before it leaves. |
