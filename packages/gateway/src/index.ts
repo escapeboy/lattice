@@ -19,6 +19,7 @@ export { SessionRegistry } from "./sessions.js";
 export type { GatewaySession } from "./sessions.js";
 export { BuildOnSession } from "./build-on-session.js";
 export type { BuildOnSessionContext } from "./build-on-session.js";
+export { BuildOnPerceptionAdapter, BuildOnActionAdapter } from "./build-on-engine.js";
 export { OperatorStore } from "./operator.js";
 export type { DeviceRecord, PersonaRecord, PolicySnapshot } from "./operator.js";
 export {
