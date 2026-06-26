@@ -22,7 +22,7 @@ import { PolicyEditor } from "./policy.js";
 import { OperatorGrantInbox } from "./operator-grants.js";
 import { buildUI } from "./ui.js";
 import { buildHandoffPage } from "./handoff-page.js";
-import { buildReplayPage } from "./replay-page.js";
+import { buildReplayPage, traceEventRows } from "./replay-page.js";
 import type { ControlPlaneBackend, PolicyConfig, SessionView } from "./types.js";
 import type { SessionTrace } from "@lattice/observability";
 import { extractMetrics } from "@lattice/observability";
@@ -163,7 +163,11 @@ export class ControlPlaneServer {
     // the FULL, un-redacted trace (page text, typed values — PII). Unlike the
     // redacted Svod copy, this is the operator's full-fidelity view, so it must
     // require the token too — otherwise the one PII surface bypasses auth.
-    const isPiiRead = method === "GET" && (path === "/replay" || path.startsWith("/replay/"));
+    // /vault and /personas are operator read surfaces (they reveal which origins
+    // hold credentials / which personas exist) — token-gated like /replay, even
+    // though they never return secret VALUES.
+    const isPiiRead = method === "GET" &&
+      (path === "/replay" || path.startsWith("/replay/") || path === "/vault" || path === "/personas");
     if (this.authToken && (method !== "GET" || isPiiRead)) {
       const auth = req.headers["authorization"];
       if (auth !== `Bearer ${this.authToken}`) {
@@ -250,6 +254,22 @@ export class ControlPlaneServer {
 
     // Visual replay: perception snapshots vs actions on one timeline.
     const replayMatch = path.match(/^\/replay\/([^/]+)$/);
+    // JSON trace-detail for the native event-timeline (token-gated above). Returns
+    // the SAME redacted timeline projection the HTML replay renders — no raw page
+    // text/values, just summarized rows.
+    const replayEventsMatch = path.match(/^\/replay\/([^/]+)\/events$/);
+    if (method === "GET" && replayEventsMatch) {
+      const trace = this.fullTraces.get(replayEventsMatch[1]!);
+      if (!trace) { res.writeHead(404).end("trace not found"); return; }
+      json(res, {
+        traceId: trace.traceId,
+        sessionId: trace.sessionId,
+        startTs: trace.startTs,
+        events: traceEventRows(trace),
+      });
+      return;
+    }
+
     if (method === "GET" && replayMatch) {
       const trace = this.fullTraces.get(replayMatch[1]!);
       if (!trace) { res.writeHead(404).end("trace not found"); return; }
@@ -259,6 +279,17 @@ export class ControlPlaneServer {
 
     if (method === "GET" && path === "/replay") {
       json(res, { traces: Array.from(this.fullTraces.keys()) });
+      return;
+    }
+
+    // Operator read surfaces (token-gated): personas (id/origins/sessions) and
+    // vault entries (id/origin/label — NEVER credential values).
+    if (this.backend && method === "GET" && path === "/personas") {
+      json(res, { personas: this.backend.listPersonas() });
+      return;
+    }
+    if (this.backend && method === "GET" && path === "/vault") {
+      json(res, { vault: this.backend.listVault() });
       return;
     }
 

@@ -126,6 +126,8 @@ export function createLatticeCore(config: LatticeServeConfig): LatticeCore {
       const imported = gateway.importPersonaCookies(personaId, origins, cookies);
       return Promise.resolve({ imported, origins });
     },
+    listPersonas: () => gateway.listPersonas(),
+    listVault: () => gateway.listVaultEntries(),
   }, config.controlPlaneToken);
   ref.control = control;
 

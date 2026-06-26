@@ -50,6 +50,64 @@ describe("ControlPlaneServer — replay reads serve full PII, so they require th
   });
 });
 
+describe("ControlPlaneServer — native-timeline + operator read surfaces (D5)", () => {
+  function mockBackend(): import("./types.js").ControlPlaneBackend {
+    return {
+      kernel: { mintHumanGrant: () => "grant" },
+      handoffs: {
+        pending: () => [], get: () => undefined, verifySignature: () => false,
+        claim: () => false, resolveApproval: () => false,
+      },
+      submitHandoffInput: () => Promise.resolve(false),
+      verifyDevice: () => false,
+      applyPolicy: (p) => ({ allowedOrigins: [], egressAllowlist: [], prohibitedActions: [], requireGrant: [], ...p }),
+      setBudget: () => {},
+      importPersona: () => Promise.resolve({ imported: 0, origins: [] }),
+      listPersonas: () => [{ personaId: "ada", origins: ["example.com"], sessions: 1 }],
+      listVault: () => [{ id: "v1", origin: "https://example.com", label: "login" }],
+    };
+  }
+
+  it("GET /replay/:id/events returns the redacted timeline projection (token-gated)", async () => {
+    const server = new ControlPlaneServer(undefined, undefined, "secret-token");
+    const { url } = await server.start(0, "127.0.0.1");
+    try {
+      server.submitTrace({
+        traceId: "tEV", sessionId: "s1", startTs: 0, endTs: 10,
+        events: [{ kind: "session_start", traceId: "tEV", sessionId: "s1", ts: 0, seq: 0, topology: "ephemeral" }],
+      });
+      expect((await fetch(`${url}/replay/tEV/events`)).status).toBe(401);
+      const ok = await fetch(`${url}/replay/tEV/events`, { headers: { Authorization: "Bearer secret-token" } });
+      expect(ok.status).toBe(200);
+      const body = (await ok.json()) as { traceId: string; events: Array<{ lane: string; text: string }> };
+      expect(body.traceId).toBe("tEV");
+      expect(body.events.length).toBe(1);
+      expect(body.events[0]!.text).toContain("session start");
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("GET /personas and /vault are token-gated and never expose values", async () => {
+    const server = new ControlPlaneServer(undefined, mockBackend(), "secret-token");
+    const { url } = await server.start(0, "127.0.0.1");
+    try {
+      expect((await fetch(`${url}/personas`)).status).toBe(401);
+      expect((await fetch(`${url}/vault`)).status).toBe(401);
+      const auth = { headers: { Authorization: "Bearer secret-token" } };
+      const personas = (await (await fetch(`${url}/personas`, auth)).json()) as { personas: unknown[] };
+      expect(personas.personas.length).toBe(1);
+      const vault = (await (await fetch(`${url}/vault`, auth)).json()) as { vault: Array<Record<string, unknown>> };
+      expect(vault.vault[0]).toEqual({ id: "v1", origin: "https://example.com", label: "login" });
+      // No credential fields leak through.
+      expect(vault.vault[0]!["password"]).toBeUndefined();
+      expect(vault.vault[0]!["username"]).toBeUndefined();
+    } finally {
+      await server.stop();
+    }
+  });
+});
+
 // ── OperatorGrantInbox — UI and MCP share one grant slice (S8) ───────────────
 
 describe("ControlPlaneServer — auth on state-changing routes", () => {

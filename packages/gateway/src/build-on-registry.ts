@@ -17,7 +17,7 @@ import { PerceptionCache } from "@lattice/perception";
 import { BuildOnSession } from "./build-on-session.js";
 import { BuildOnContext } from "./build-on-context.js";
 import { BuildOnPerceptionAdapter, BuildOnActionAdapter } from "./build-on-engine.js";
-import type { GatewaySession, SessionProvider, SessionTopology } from "./sessions.js";
+import type { GatewaySession, PersonaInfo, SessionProvider, SessionTopology } from "./sessions.js";
 import { randomUUID } from "node:crypto";
 
 export interface BuildOnRegistryOptions {
@@ -125,6 +125,19 @@ export class BuildOnSessionRegistry implements SessionProvider {
     const prev = this.personaCookies.get(personaId) ?? [];
     this.personaCookies.set(personaId, [...prev, ...cookies]);
     return cookies.length;
+  }
+
+  listPersonas(): PersonaInfo[] {
+    const ids = new Set<string>(this.personaCookies.keys());
+    const live = new Map<string, number>();
+    for (const s of this.sessions.values()) {
+      if (s.personaId) { ids.add(s.personaId); live.set(s.personaId, (live.get(s.personaId) ?? 0) + 1); }
+    }
+    return Array.from(ids).map((personaId) => {
+      const cookies = this.personaCookies.get(personaId) ?? [];
+      const origins = Array.from(new Set(cookies.map((c) => c.domain).filter((d): d is string => !!d)));
+      return { personaId, origins, sessions: live.get(personaId) ?? 0 };
+    });
   }
 
   async destroyAll(): Promise<void> {

@@ -11,7 +11,20 @@ function esc(s: string): string {
   return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }
 
-function rowFor(e: TraceEvent, t0: number): { lane: string; cls: string; text: string; rel: number } {
+export interface TraceEventRow { lane: string; cls: string; text: string; rel: number }
+
+/**
+ * The redacted timeline projection of a trace — the same "what it saw vs what it
+ * did" summary the HTML replay renders, as structured rows. Values are summarized
+ * (action values truncated, no raw form contents), matching the PII posture of
+ * every trace surface. Used by the JSON `/replay/:id` endpoint (native timeline).
+ */
+export function traceEventRows(trace: SessionTrace): TraceEventRow[] {
+  const t0 = trace.startTs;
+  return trace.events.map((e) => rowFor(e, t0));
+}
+
+function rowFor(e: TraceEvent, t0: number): TraceEventRow {
   const rel = e.ts - t0;
   switch (e.kind) {
     case "session_start": return { lane: "meta", cls: "meta", text: `session start (${e.topology})`, rel };

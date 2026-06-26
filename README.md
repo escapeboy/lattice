@@ -37,6 +37,10 @@ end to end.
 - **Regulated industries** (finance, health, gov): every consequential action is
   human-granted and audited; PII is redacted before traces are persisted; the
   trust boundary lives in code, not in a vendor promise.
+- **Operators on a Mac**: a native macOS app (menubar + control plane) that
+  supervises the whole stack, keeps vault secrets in the Keychain, and ships the
+  egress firewall **on by default** (20/20). Windows/Linux run console-only.
+  See [Desktop (macOS)](#desktop-macos--native-app).
 
 ## Differentiators — honest, measured
 
@@ -169,6 +173,35 @@ For an outbound egress allowlist at the **network** layer (defense-in-depth on
 top of the app-level proxy), see the squid/nftables recipe in
 [SECURITY.md](./SECURITY.md) §7.
 
+### Desktop (macOS) — native app
+
+macOS gets a **fully native SwiftUI** control plane + supervisor ([ADR 0003](apps/desktop-macos/README.md)) —
+no web, no webview. One app is both the UI **and** the supervisor: launch it and
+the whole stack (gateway + agent-browser + egress proxy + Chromium) comes up;
+quit and it tears down cleanly (zero orphans). Vault secrets live in the **macOS
+Keychain**; human-handoff approvals arrive as **native notifications** with
+Approve/Deny.
+
+```
+# build (until a notarized release .dmg is published)
+pnpm -w build && cd apps/desktop-macos && ./Scripts/make-app.sh
+open build/Lattice.app          # menubar shield → first-run egress setup → Control Plane
+```
+Install (release): open `Lattice.dmg`, drag **Lattice** to **Applications**, launch,
+and complete the **first-run allowlist** (the origins the agent may reach).
+
+**Desktop Gate 2 = 20/20.** Unlike `docker compose up` (egress proxy off by
+default → 18/20), the desktop ships the **egress firewall ON by default**, scoped
+by that first-run allowlist — the secure config is the default via setup UX. On
+desktop the app proxy is the **sole** egress layer (no squid behind it), so the
+two egress-exfil attacks are wired → full 20/20. Building/signing/notarizing the
+`.dmg`: see [apps/desktop-macos/NOTARIZATION.md](apps/desktop-macos/NOTARIZATION.md).
+
+**Windows / Linux** stay **console-only** — no new code. Run the stack via
+`docker compose up` or `node apps/serve/dist/main.js` (above) and drive it from
+Claude Code / Desktop over the localhost MCP endpoint. The native app is a
+macOS-exclusive face on the **same** backend.
+
 ## MCP tool reference
 
 All tools return MCP `text` content containing JSON. Browser sessions are
@@ -280,6 +313,13 @@ Docker gateway runs. The engine layer runs on **agent-browser** (ADR 0002) as th
 default, firewalled, internal-only substrate, with a CDP path kept as a dev
 opt-in. A native Chromium fork is a deliberate, human-gated future step, not
 started automatically.
+
+The **macOS desktop app** (ADR 0003) is functionally complete: native control
+plane (theater · approvals · policy · replay timeline · personas/vault),
+supervisor with zero-orphan teardown, Vault→Keychain, handoff→native
+notifications, and the egress firewall on by default (desktop Gate 2 = 20/20).
+It builds to a dev-signed `.app` + `.dmg`; a notarized release awaits a Developer
+ID signature.
 
 ## License & attribution
 
