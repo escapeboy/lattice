@@ -28,7 +28,7 @@ actions, injected URLs, accessibility labels), to:
 |---|---|---|---|
 | T1 | **Indirect prompt injection → operator mutation** — lift page text into a `policy_set` / `persona_import` call to weaken the agent's own governance or steal credentials | tainted-origin registry blocks any operator call carrying a page-origin argument | `packages/kernel/src/operator.ts:146-156`, `:219-224` |
 | T2 | **Indirect injection → consequential action** — "click Pay now" / "send this email" | consequential actions require a human grant; no handler ⇒ denied | `packages/kernel/src/kernel.ts:143-169` |
-| T3 | **Egress exfiltration** — a page form/beacon posting collected data to an attacker origin | per-request egress firewall (proxy on the real path) + kernel `checkEgress` | `packages/egress-proxy/src/index.ts:81-132`, `packages/kernel/src/kernel.ts:210-244` |
+| T3 | **Egress exfiltration** — a page form/beacon posting collected data to an attacker origin | kernel `checkEgress` (logic) + egress proxy on the real path — **HTTP only; HTTPS not yet app-gated** (§4c) | `packages/egress-proxy/src/index.ts:81-132`, `packages/kernel/src/kernel.ts:210-244` |
 | T4 | **Self-weakening** — drop a prohibited primitive or disable tainting via the operator surface, even with a human grant | constitutional floor refuses the patch regardless of grant | `packages/kernel/src/operator.ts:184-195`, `:244-263` |
 | T5 | **Kernel-bypass escape hatch** — reach `eval`, raw CDP, or `file://` through the underlying engine | engine firewall + structural surface omission | `packages/engine-adapter/src/firewall.ts:112-130` |
 | T6 | **Origin wander** — lure the agent off the task's scoped origins | navigation scope check + unconditional forbidden-scheme floor | `packages/kernel/src/kernel.ts:171-208` |
@@ -78,12 +78,31 @@ recipe can never bypass gating (`packages/recipe/src/runner.ts:34-38, 153-163`).
 The policy is `kernel.checkEgress` (`packages/kernel/src/kernel.ts:210-244`):
 same-origin destinations are allowed, cross-origin destinations are allowed only
 if explicitly allowlisted, everything else (including all content-proposed exfil
-targets) is blocked. The *enforcement* on the real in-browser request path is
-`@lattice/egress-proxy` (`packages/egress-proxy/src/index.ts`): agent-browser is
-launched with `HTTP(S)_PROXY` pointing at it, so every fetch / XHR / img /
-beacon / form POST / navigation passes through `onRequest` / `onConnect` and is
-gated per-request before any byte leaves (`index.ts:81-132`). See Section 6 for
-this pillar's honest ceiling (origin-level, not provenance-aware).
+targets) is blocked.
+
+**Honest enforcement ceiling — HTTP only (verified).** The intended enforcement
+on the real in-browser request path is `@lattice/egress-proxy`
+(`packages/egress-proxy/src/index.ts`): agent-browser is launched with
+`HTTP(S)_PROXY` pointing at it. In practice this **only gates HTTP** egress —
+agent-browser/Chromium does **not** route HTTPS browser traffic through the proxy
+(verified across `HTTP_PROXY`/`HTTPS_PROXY` env vars, agent-browser `--proxy`, and
+the raw Chromium `--proxy-server` flag; none deliver an HTTPS `CONNECT` to the
+proxy, and a manual `CONNECT` confirms the proxy itself is correct). So:
+
+- **HTTP** sub-resource egress (beacon / form POST / fetch over `http://`) **is**
+  gated on the real path (live e2e proven — `live.e2e.test.ts`).
+- **HTTPS** sub-resource egress (the realistic exfil vector) is blocked by
+  `checkEgress` **logic** (function-level) but is **NOT enforced** on the real
+  browser path today — no caller reaches that logic for browser-initiated HTTPS
+  sub-resources.
+- Top-level **navigation** (HTTP and HTTPS) is separately scoped by the kernel
+  (`origin_out_of_scope`), so the agent cannot *navigate* to a disallowed origin.
+
+**Compensating control today:** run a network/infra egress layer (squid / pf)
+in front of the process to gate HTTPS at the network layer. App-level HTTPS
+gating is roadmap — see `plans/https-egress-roadmap` (a transparent `pf` →
+SNI-inspecting proxy; a separate project with its own risk profile). See Section 6
+for the origin-level (not provenance-aware) ceiling that applies on top of this.
 
 ### (d) Constitutional floor
 
@@ -176,41 +195,49 @@ claims above.
 | Egress proxy allow/deny/tunnel/403/audit | `packages/egress-proxy/src/index.test.ts` |
 | **Live** e2e: real agent-browser behind the proxy; a denied beacon is blocked and the attacker server gets zero hits | `packages/egress-proxy/src/live.e2e.test.ts` (opt-in `LATTICE_LIVE_ENGINE=1`) |
 | Recipe steps flow through the governed gate (a recipe cannot bypass gating) | `packages/recipe/src/runner.test.ts` |
-| The whole 20-attack governance corpus, adjudicated by real code | `packages/eval/src/governance.test.ts` |
+| The whole 22-attack governance corpus, adjudicated by real code | `packages/eval/src/governance.test.ts` |
 
 ---
 
 ## 5. The governance gate — as a narrative
 
-The governance eval (`packages/eval/src/governance.ts`) is a 20-attack corpus of
+The governance eval (`packages/eval/src/governance.ts`) is a 22-attack corpus of
 injection / bypass attempts. **No mocks:** each attack drives the real
 `@lattice/kernel` and the real engine firewall and returns a boolean verdict
 (`governance.ts:42, 70-78`). Three defenders are compared:
 
-| Defender | Blocks | What it is |
+| Defender | Blocks (function-level) | What it is |
 |---|--:|---|
-| **Lattice** (real kernel + firewall) | **20/20 (100%)** | the product |
-| Hardened agent-browser (all opt-in flags) | **8/20 (40%)** | plain action gating only |
-| Bare agent-browser / screenshot agent | **0/20 (0%)** | governance off by default |
+| **Lattice** (real kernel + firewall) | **22/22 (100%)** | the product |
+| Hardened agent-browser (all opt-in flags) | **8/22 (36%)** | plain action gating only |
+| Bare agent-browser / screenshot agent | **0/22 (0%)** | governance off by default |
 
 These numbers were produced by running the in-repo eval, not asserted by hand;
-the test `packages/eval/src/governance.test.ts` pins them (Lattice misses must be
-empty; `latticeBlocked === total`).
+the test `packages/eval/src/governance.test.ts` pins them.
 
-**Function-level vs wired-on-deployment.** The 20/20 above is the *function-level*
-block rate: the kernel/firewall refuses every attack. What a given **deployment**
-actually wires is narrower, and the eval models it honestly (`wiredCountFor`):
+**Function-level vs wired-on-deployment.** The 22/22 above is the *function-level*
+block rate: the kernel/firewall **logic** refuses every attack. What a given
+**deployment** actually **enforces on the real browser path** is narrower, and the
+eval models it honestly (`wiredCountFor`):
 
-| Deployment | Wired | Note |
+| Deployment | Wired (real path) | Note |
 |---|--:|---|
-| Bare `docker compose up` (build-on engine, **no** allowlist) | **18/20** | egress proxy is off without an allowlist → the 2 `egress-exfil` attacks are unwired (egress unrestricted by the dev default) |
-| `docker compose up` + `LATTICE_ALLOWED_ORIGINS` (proxy on) | **20/20** | the production posture; required for any HTTP-exposed deployment |
-| Legacy `LATTICE_ENGINE=cdp` (no build-on firewall) | 14–16/20 | the 4 `escape-hatch` attacks are also unwired — do not use for untrusted pages |
+| Bare `docker compose up` (build-on engine, **no** allowlist) | **18/22** | egress proxy off → all 4 `egress-exfil` attacks unwired (egress unrestricted by the dev default) |
+| `docker compose up` + `LATTICE_ALLOWED_ORIGINS` (proxy on) | **20/22** | proxy gates **HTTP** egress; the **2 HTTPS `egress-exfil` vectors stay unwired** (see below) |
+| macOS desktop default (proxy ON via first-run allowlist) | **20/22** | same — HTTP egress wired, HTTPS not; the app proxy is the sole egress layer here |
+| Legacy `LATTICE_ENGINE=cdp` (no build-on firewall) | 14–16/22 | the 4 `escape-hatch` attacks are also unwired — do not use for untrusted pages |
 
-The headline is therefore **"firewalled-by-default, 18/20 wired zero-config, 20/20
-once you scope the deployment"** — not "20/20 out of the box". The two wiring
-conditions (`escape-hatch` needs the build-on engine; `egress-exfil` needs an
-allowlist) are exactly what `apps/serve`/`docker-compose` gate on.
+**The honest headline is "firewalled-by-default; 18/22 wired zero-config; 20/22
+once you scope the deployment — with HTTP egress gated and HTTPS sub-resource
+egress NOT yet app-gated."** There is **no honest "20/20 / fully wired" claim**:
+
+- `escape-hatch` (4) needs the build-on engine.
+- `egress-exfil` HTTP (2) needs an allowlist (the proxy gates HTTP — live e2e).
+- `egress-exfil` HTTPS (2) is blocked by `checkEgress` logic but **never reaches
+  the real path** — agent-browser/Chromium does not route HTTPS through the proxy
+  (§4c). Compensating control: a network/infra egress layer (squid/pf); app-level
+  HTTPS gating is roadmap (`plans/https-egress-roadmap`). The test pins this so it
+  cannot regress to a false "fully wired" (`unwiredHttpsEgress`).
 
 **Six attack classes only Lattice covers** — a hardened agent-browser
 *structurally* cannot, because it has no operator surface, no constitutional
@@ -275,14 +302,18 @@ per-request **destination-origin allowlist** (`originAllowlist`,
 is **known future work** — it needs a per-request callback (firewalled CDP
 `Fetch`, an agent-browser intercept callback, or a fork). The proxy is also only
 *started* when an allowlist is configured (`apps/serve/src/main.ts`), so on a bare
-`docker compose up` egress is unrestricted by the dev default and the 2
-egress-exfil attacks are **unwired** (18/20) until you set `LATTICE_ALLOWED_ORIGINS`.
+`docker compose up` egress is unrestricted by the dev default and all 4
+egress-exfil attacks are **unwired** (18/22) until you set `LATTICE_ALLOWED_ORIGINS`.
 
-> "20/20 wired" is the **configured** deployment (build-on engine + an origin
-> allowlist). A bare `docker compose up` is **18/20** (egress proxy off). And even
-> at 20/20 the egress decision is **origin-level**, *not* provenance-aware —
-> different claims; the allowlist precondition and the origin-level ceiling both
-> hold on the wired path.
+> The egress proxy has **two stacked limitations** on the wired path, neither
+> oversold: (1) it only **starts** with an allowlist; (2) it only gates **HTTP** —
+> agent-browser/Chromium does not route **HTTPS** browser traffic through it
+> (§4c), so the 2 HTTPS `egress-exfil` vectors stay unwired even when configured.
+> So the configured deployment is **20/22**, not a full 22 — and even on the HTTP
+> path the decision is **origin-level**, not provenance-aware. There is no
+> "fully wired" egress claim today. HTTPS app-gating is roadmap
+> (`plans/https-egress-roadmap`); the compensating control now is a network/infra
+> egress layer (squid/pf).
 
 ### Two egress layers, neither oversold
 

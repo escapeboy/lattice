@@ -3,18 +3,20 @@
 **A governance browser runtime for agents — a firewalled-by-default build-on
 stack whose security moat is *measured*, not promised behind an opt-in flag.**
 
-A 20-attack injection/bypass corpus, adjudicated by the **real** kernel and
-firewall (no mocks): the kernel blocks **20/20 (100%)** at the function level —
-versus **8/20** for a fully-hardened agent-browser and **0/20** for the bare
-engine. On the **default `docker compose up`** deployment, **18/20 are wired
-zero-config** by the firewalled build-on engine; the remaining **2** — the
-content-proposed **egress-exfil** class — wire once you set
-`LATTICE_ALLOWED_ORIGINS`, taking it to **20/20**. That allowlist is required for
-any real (HTTP-exposed) deployment, and the egress firewall is **origin-level**:
-it *must* be told which origins are allowed (the proxy keys on the destination,
-not the initiating page) — the ceiling of the fork-free path, not a gap. Numbers
-come from an in-repo eval, pinned by CI, not asserted by hand
-([`packages/eval`](./packages/eval), [SECURITY.md](./SECURITY.md)).
+A 22-attack injection/bypass corpus, adjudicated by the **real** kernel and
+firewall (no mocks): the kernel **logic** blocks **22/22 (100%)** at the function
+level — versus **8/22** for a fully-hardened agent-browser and **0/22** for the
+bare engine. What a deployment **enforces on the real browser path** is narrower
+and we say so: **18/22 wired zero-config** by the firewalled build-on engine;
+setting `LATTICE_ALLOWED_ORIGINS` starts the egress proxy → **20/22**. The proxy
+gates **HTTP** egress; it does **not** gate **HTTPS** sub-resource egress
+(agent-browser/Chromium doesn't route HTTPS through it — verified), so **2 HTTPS
+egress-exfil vectors stay unwired** on the app path today. There is **no "20/20 /
+fully wired" claim**: HTTPS app-gating is roadmap; the compensating control now is
+a network/infra egress layer (squid/pf). The egress decision is also
+**origin-level**, not provenance-aware. Numbers come from an in-repo eval, pinned
+by CI, not asserted by hand ([`packages/eval`](./packages/eval),
+[SECURITY.md](./SECURITY.md)).
 
 Lattice gives an agent a **semantic** view of the web (an Interaction Graph, not
 raw DOM or pixels), **trusted** semantic actions, a concurrency runtime for many
@@ -39,14 +41,15 @@ end to end.
   trust boundary lives in code, not in a vendor promise.
 - **Operators on a Mac**: a native macOS app (menubar + control plane) that
   supervises the whole stack, keeps vault secrets in the Keychain, and ships the
-  egress firewall **on by default** (20/20). Windows/Linux run console-only.
+  egress firewall **on by default** (HTTP egress gated → 20/22; HTTPS not yet
+  app-gated). Windows/Linux run console-only.
   See [Desktop (macOS)](#desktop-macos--native-app).
 
 ## Differentiators — honest, measured
 
 | Dimension | Number | Against |
 |---|---|---|
-| **Governance** | kernel blocks **20/20** · **18/20 wired zero-config** on `docker compose up`, **20/20 with `LATTICE_ALLOWED_ORIGINS`** | hardened agent-browser **8/20** · bare **0/20** |
+| **Governance** | kernel logic blocks **22/22** · real-path **18/22 wired zero-config**, **20/22 with `LATTICE_ALLOWED_ORIGINS`** (HTTP egress; 2 HTTPS egress-exfil vectors not app-gated) | hardened agent-browser **8/22** · bare **0/22** |
 | **Economics** (vs the Chrome method) | **10.2× cheaper** than a screenshot agent · **4.1×** than raw-DOM | — |
 | **Economics** (vs a semantic engine) | **1.64×** vs agent-browser — *we build ON it; no token win is claimed here* | agent-browser |
 | **Recipe** on a known flow | planning tokens **6.4× lower** (669→105) · round-trips **5→1** · drift success **80%→100%** | a naive baked-locator recipe |
@@ -60,16 +63,18 @@ single-page perception tokens against agent-browser the two are the same order o
 magnitude, and we say so. The real differentiator against a semantic engine is
 governance + cross-mutation stable identity + streamed deltas + the recipe moat.
 
-> **Egress scope (honest).** The egress proxy enforces a per-request
-> **destination-origin allowlist** and is active only when an allowlist is
-> configured — so a bare `docker compose up` (no allowlist) leaves egress
-> unrestricted by the dev default, and the 2 egress-exfil attacks are **unwired**
-> there (18/20). Setting `LATTICE_ALLOWED_ORIGINS` turns the proxy on → 20/20.
-> Over HTTPS CONNECT the proxy sees `host:port`, not the page that initiated the
-> request, so it is **origin-level**: content-vs-task **provenance** (kernel A4)
-> is *not* visible at the proxy layer and stays a kernel-level property. This is
-> the ceiling of the fork-free path, not a provenance-aware egress firewall. See
-> [SECURITY.md](./SECURITY.md) §6.
+> **Egress scope (honest).** Two stacked limitations, neither oversold:
+> (1) the proxy is **active only when an allowlist is configured** — a bare
+> `docker compose up` leaves egress unrestricted (18/22); set
+> `LATTICE_ALLOWED_ORIGINS` to turn it on. (2) The proxy gates **HTTP only** —
+> agent-browser/Chromium does **not** route HTTPS browser traffic through it
+> (verified across env vars, `--proxy`, and raw `--proxy-server`), so the **2
+> HTTPS `egress-exfil` vectors stay unwired** even when configured → **20/22, not
+> a full 22**. HTTPS sub-resource exfil is blocked by `checkEgress` *logic* but
+> not enforced on the real path; top-level navigation is separately kernel-scoped.
+> Compensating control today: a network/infra egress layer (squid/pf). App-level
+> HTTPS gating is roadmap. The HTTP decision is also **origin-level**, not
+> provenance-aware. See [SECURITY.md](./SECURITY.md) §4c, §6.
 
 ## Where it breaks
 
@@ -119,7 +124,7 @@ A pnpm monorepo of focused packages (13 published + 2 apps):
 | `@lattice/recipe` | Per-domain **declarative** recipes (capability packs): versioned, applied instead of rediscovering a known flow; resolved against the live IG and run through the **same governed actuator** (a recipe shortcuts perception/planning, **not** gating), with graceful fallback on drift. |
 | `@lattice/runtime` | Scheduler + resource governor for N concurrent contexts; ephemeral/persistent topologies; fan-out. |
 | `@lattice/kernel` | Security kernel — content tainting, policy classification, capability gating, egress firewall, constitutional floor, audit log. |
-| `@lattice/egress-proxy` | App-level egress firewall: a forward proxy agent-browser runs behind (`HTTP_PROXY`), gating every browser request per destination-origin before it leaves. |
+| `@lattice/egress-proxy` | App-level egress firewall: a forward proxy agent-browser runs behind (`HTTP_PROXY`), gating browser requests per destination-origin. **Gates HTTP only today** — Chromium doesn't route HTTPS through it ([SECURITY.md](./SECURITY.md) §4c). |
 | `@lattice/gateway` | MCP server (stdio **and** Streamable HTTP). Tool groups: `session.*` `perceive.*` `act.*` `extract.*` `capability.*` `vault.*` `policy.*`. |
 | `@lattice/observability` | Structured, diffable traces; deterministic replay; metrics; Svod emission. |
 | `@lattice/sdk-ts` | Thin TypeScript client. |
@@ -157,7 +162,7 @@ token is generated and printed at startup (access is never open). Copy
 ```bash
 docker compose up --build
 # Gateway: http://localhost:8765/mcp   Health: http://localhost:8765/health
-# Wire egress to 20/20 — scope the deployment to its origins:
+# Start the HTTP egress proxy — scope the deployment to its origins (18/22 → 20/22):
 LATTICE_ALLOWED_ORIGINS="https://app.example.com" docker compose up --build
 ```
 
@@ -167,11 +172,14 @@ downloads its own Chrome for Testing on first run. `LATTICE_ENGINE=cdp` selects
 the legacy raw-CDP engine (no build-on firewall): an explicit, **unsafe** dev-only
 override — never in production. A bare `docker compose up` leaves egress
 unrestricted (dev default); set `LATTICE_ALLOWED_ORIGINS` to turn on the egress
-proxy (18/20 → 20/20 wired).
+proxy (18/22 → 20/22 wired). The proxy gates **HTTP** egress; **HTTPS**
+sub-resource egress is **not** app-gated today (agent-browser/Chromium doesn't
+route HTTPS through it — see [SECURITY.md](./SECURITY.md) §4c).
 
-For an outbound egress allowlist at the **network** layer (defense-in-depth on
-top of the app-level proxy), see the squid/nftables recipe in
-[SECURITY.md](./SECURITY.md) §7.
+For **HTTPS** egress, or defense-in-depth on top of the app proxy, run a
+**network-layer** egress allowlist (squid/nftables/pf) in front of the process —
+the squid/nftables recipe is in [SECURITY.md](./SECURITY.md) §7. This is the
+compensating control until app-level HTTPS gating lands.
 
 ### Desktop (macOS) — native app
 
@@ -190,12 +198,15 @@ open build/Lattice.app          # menubar shield → first-run egress setup → 
 Install (release): open `Lattice.dmg`, drag **Lattice** to **Applications**, launch,
 and complete the **first-run allowlist** (the origins the agent may reach).
 
-**Desktop Gate 2 = 20/20.** Unlike `docker compose up` (egress proxy off by
-default → 18/20), the desktop ships the **egress firewall ON by default**, scoped
-by that first-run allowlist — the secure config is the default via setup UX. On
-desktop the app proxy is the **sole** egress layer (no squid behind it), so the
-two egress-exfil attacks are wired → full 20/20. Building/signing/notarizing the
-`.dmg`: see [apps/desktop-macos/NOTARIZATION.md](apps/desktop-macos/NOTARIZATION.md).
+**Desktop Gate 2 = 20/22.** Unlike `docker compose up` (egress proxy off by
+default → 18/22), the desktop ships the **egress firewall ON by default**, scoped
+by that first-run allowlist — the secure config is the default via setup UX. The
+proxy gates **HTTP** egress; on desktop it is the **sole** egress layer (no squid
+behind it), so the **2 HTTPS `egress-exfil` vectors stay unwired** — desktop is
+**20/22, not 20/20**. (If you handle untrusted HTTPS-exfil-sensitive workloads on
+desktop, that gap is real until app-level HTTPS gating lands.)
+Building/signing/notarizing the `.dmg`: see
+[apps/desktop-macos/NOTARIZATION.md](apps/desktop-macos/NOTARIZATION.md).
 
 **Windows / Linux** stay **console-only** — no new code. Run the stack via
 `docker compose up` or `node apps/serve/dist/main.js` (above) and drive it from
@@ -289,7 +300,7 @@ found and fixed test-first**), and the honest ceilings are in
 
 - **Content tainting** — perception output is marked tainted (`TaintedStr`) and quarantined; page text cannot be promoted to instruction context (type-level). Prompt-injection in a page does not change behavior.
 - **Capability gating** — every action is classified `read`/`benign`/`consequential`/`prohibited` and intercepted **before** it takes effect; `consequential` requires a human grant.
-- **Egress firewall** — destinations are checked against an allowlist (origin-level on the wired path; see the honest scope note above).
+- **Egress firewall** — destinations are checked against an allowlist (origin-level; **HTTP-only enforcement on the real path**, HTTPS sub-resource egress not yet app-gated — see the honest scope note above).
 - **Constitutional floor** — invariants no `policy_set` may weaken, *by anyone* through the API, even with a valid grant: tainting stays on, floor-prohibited primitives stay prohibited, content-proposed egress stays blocked.
 - **Human-grant asymmetry** — operator writes need a single-use token minted only by the human control plane; the agent cannot self-authorize, only request a handoff. `persona_import` is human-UI-only.
 
@@ -317,9 +328,10 @@ started automatically.
 The **macOS desktop app** (ADR 0003) is functionally complete: native control
 plane (theater · approvals · policy · replay timeline · personas/vault),
 supervisor with zero-orphan teardown, Vault→Keychain, handoff→native
-notifications, and the egress firewall on by default (desktop Gate 2 = 20/20).
-It builds to a dev-signed `.app` + `.dmg`; a notarized release awaits a Developer
-ID signature.
+notifications, and the egress firewall on by default (desktop Gate 2 = **20/22** —
+HTTP egress gated; HTTPS sub-resource egress not yet app-gated, a documented
+limitation). It builds to a dev-signed `.app` + `.dmg`; a notarized release awaits
+a Developer ID signature.
 
 ## License & attribution
 

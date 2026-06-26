@@ -24,8 +24,9 @@ macOS-exclusive.
   human-handoff approvals as **native notifications** with Approve/Deny
   (first-claim-wins); menubar live status.
 - **Egress firewall ON by default** via a guided **first-run allowlist** — the
-  desktop's secure default (Gate 2 = 20/20; the app proxy is the sole egress
-  layer here).
+  desktop's secure default (Gate 2 = 20/22; the app proxy is the sole egress layer
+  here and gates **HTTP only** — HTTPS sub-resource egress is not yet app-gated,
+  see SECURITY.md §4c).
 
 ## Layout
 
@@ -72,7 +73,8 @@ handles certificates. See **[NOTARIZATION.md](./NOTARIZATION.md)**.
 ## Status
 
 D0–D7 complete: supervisor, embedded bun backend, native MCP/SSE client, native
-control plane, Keychain + notifications, egress-on-by-default (Gate 2 = 20/20),
-hardened dev-signed `.app` + `.dmg`. A **notarized** release awaits a Developer ID
+control plane, Keychain + notifications, egress-on-by-default (Gate 2 = 20/22 —
+HTTP egress gated, HTTPS not yet app-gated), hardened dev-signed `.app` + `.dmg`.
+A **notarized** release awaits a Developer ID
 signature (NOTARIZATION.md). Windows/Linux stay console-only — this app is a
 macOS-exclusive face on the same backend.

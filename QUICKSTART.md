@@ -270,10 +270,12 @@ What "secure by default" means concretely, all verified at boot:
 - **The build-on engine is the default.** You opt *into* the weaker raw-CDP
   stack with `LATTICE_ENGINE=cdp` (and get a warning); you never fall into it.
 - **The egress firewall turns on with an allowlist.** Set
-  `LATTICE_ALLOWED_ORIGINS` and/or `LATTICE_EGRESS_ALLOWLIST` and every browser
-  request routes through the Lattice forward proxy. Verified boot line:
+  `LATTICE_ALLOWED_ORIGINS` and/or `LATTICE_EGRESS_ALLOWLIST` and **HTTP** browser
+  requests route through the Lattice forward proxy. Verified boot line:
   `Egress firewall active — browser traffic gated through http://127.0.0.1:<port> (origin allowlist).`
-  An **empty** allowlist is the dev-unrestricted default (no proxy).
+  An **empty** allowlist is the dev-unrestricted default (no proxy). **Note:** the
+  proxy gates **HTTP only** — HTTPS browser traffic is not routed through it
+  (SECURITY.md §4c); for HTTPS egress use a network-layer proxy (squid/pf).
 - **Consequential actions need a grant.** `policy_classify submit` →
   `consequential`; executing it requires a human grant minted in the control
   plane. Page content reaching the agent is tainted and cannot be promoted into
@@ -293,9 +295,10 @@ docker compose up --build
 # Gateway: http://localhost:8765/mcp   Health: http://localhost:8765/health
 ```
 
-A bare `docker compose up` is **18/20** governance wired (egress unrestricted by
-the dev default). Set an origin allowlist to start the egress proxy → **20/20**.
-Tighten policy for a real host before exposing it:
+A bare `docker compose up` is **18/22** governance wired (egress unrestricted by
+the dev default). Set an origin allowlist to start the egress proxy → **20/22**
+(the proxy gates HTTP egress; the 2 HTTPS egress-exfil vectors stay unwired —
+SECURITY.md §4c). Tighten policy for a real host before exposing it:
 
 ```bash
 export LATTICE_ALLOWED_ORIGINS="https://app.example.com"

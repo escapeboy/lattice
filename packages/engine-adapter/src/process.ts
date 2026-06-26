@@ -95,6 +95,10 @@ export class AgentBrowserProcess implements AbRunner {
         // Egress firewall: route the browser's traffic through the Lattice proxy.
         // NO_PROXY for loopback keeps the agent-browser daemon's own control IPC
         // (and any localhost target) off the proxy; real egress still goes through.
+        // KNOWN LIMITATION: agent-browser/Chromium only routes HTTP through this
+        // proxy, not HTTPS (env vars AND --proxy/--proxy-server flags all fail to
+        // gate HTTPS CONNECT — verified). HTTPS egress is gated at the kernel
+        // (navigation scope) only; sub-resource HTTPS egress is NOT proxy-gated.
         ...(this.proxyUrl
           ? { env: { ...process.env, HTTP_PROXY: this.proxyUrl, HTTPS_PROXY: this.proxyUrl, NO_PROXY: "127.0.0.1,localhost" } }
           : {}),
