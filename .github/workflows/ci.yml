@@ -70,3 +70,9 @@ jobs:
       - name: Assemble .app bundle (Swift + bun backend)
         working-directory: apps/desktop-macos
         run: ./Scripts/make-app.sh release
+
+      - name: Sign (ad-hoc) + package .dmg
+        working-directory: apps/desktop-macos
+        run: |
+          ./Scripts/sign-app.sh
+          ./Scripts/make-dmg.sh
