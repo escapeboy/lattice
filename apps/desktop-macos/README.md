@@ -11,38 +11,68 @@ as a child process tree ("start the app → the whole stack comes up").
 Windows/Linux remain console-only (`docker compose up`); this directory is
 macOS-exclusive.
 
+## What it does
+
+- **Supervisor** — one app is both UI and process manager. Launch → the whole
+  stack (gateway + agent-browser + egress proxy + Chromium) comes up; quit →
+  it tears the process group down cleanly (zero orphans); a sidecar crash →
+  restart with backoff.
+- **Native control plane** (no webview) — live session theater (SSE perceive
+  deltas), approval inbox (approve / deny), policy editor, replay event timeline,
+  personas & vault panels.
+- **Native integrations** — Vault encryption key in the **macOS Keychain**;
+  human-handoff approvals as **native notifications** with Approve/Deny
+  (first-claim-wins); menubar live status.
+- **Egress firewall ON by default** via a guided **first-run allowlist** — the
+  desktop's secure default (Gate 2 = 20/20; the app proxy is the sole egress
+  layer here).
+
 ## Layout
 
 ```
 apps/desktop-macos/
-  Package.swift            SwiftPM executable (opens in Xcode; builds via `swift build`)
-  Sources/Lattice/         App entry, menubar, and (later) Supervisor / MCPClient / Views
-  Resources/               embedded backend binary lands here (D1)
-  Info.plist               bundle metadata (LSUIElement — menubar-only)
-  Scripts/make-app.sh      assembles build/Lattice.app from the build product
+  Package.swift            SwiftPM package — LatticeKit (logic) + Lattice (app)
+  Sources/Lattice/         @main App + AppDelegate (lifecycle, signal teardown)
+  Sources/LatticeKit/      Supervisor · MCPClient · ControlPlaneClient · Keychain ·
+                           HandoffNotifier · DesktopEgress · Views/
+  Tests/LatticeKitTests/   supervisor / MCP / control-plane / Keychain / egress
+  Signing/Lattice.entitlements   hardened-runtime + JIT entitlements
+  Scripts/                 make-app · build-backend · sign-app · make-dmg
+  NOTARIZATION.md          operator notarization steps (Developer ID)
 ```
 
 ## Build & run (local dev)
 
 ```bash
-pnpm build                   # at repo root: produces apps/serve/dist (backend source)
+pnpm -w build                # repo root: produces apps/serve/dist (backend source)
 cd apps/desktop-macos
 ./Scripts/make-app.sh        # swift build + bun backend → build/Lattice.app
-open build/Lattice.app       # menubar icon appears
+open build/Lattice.app       # menubar shield → first-run egress setup → Control Plane
+```
+`make-app.sh` runs `build-backend.sh` (bun-compiles the backend + stages the
+agent-browser engine into `Contents/Resources/backend/`; pinned in `backend/VERSIONS`).
+`LATTICE_SKIP_BACKEND=1` skips the backend build for UI-only iteration. Ports
+default to 8765/7900; override with `LATTICE_DESKTOP_GATEWAY_PORT` /
+`LATTICE_DESKTOP_CP_PORT`.
+
+### Tests
+```bash
+swift test                                 # always-on (process-group, egress, Keychain)
+LATTICE_RUN_BACKEND_TESTS=1 swift test     # + integration (real backend + Chromium)
 ```
 
-`make-app.sh` runs `build-backend.sh`, which bun-compiles the gateway/control-plane
-into a single `lattice-backend` executable and stages the agent-browser native
-engine beside it, then embeds the whole thing under `Contents/Resources/backend/`
-(pinned versions in `backend/VERSIONS`). Set `LATTICE_SKIP_BACKEND=1` to skip the
-backend build for fast UI-only iteration.
-
-Developer ID signing + notarization (D7) is **not** done here — that requires the
-user's signing identity. The script ad-hoc signs only, which is enough to launch
-locally.
+### Package + sign + .dmg
+```bash
+./Scripts/sign-app.sh        # ad-hoc dev signature (hardened runtime)
+./Scripts/make-dmg.sh        # build/Lattice.dmg (drag-to-install)
+```
+Developer ID signing + notarization is the operator's step — the agent never
+handles certificates. See **[NOTARIZATION.md](./NOTARIZATION.md)**.
 
 ## Status
 
-This is the macOS desktop workstream (D-series); the step list and acceptance
-gates live in the `macos-desktop-plan` design note. D0 (this scaffold) = menubar
-app that builds on CI and launches; no functionality yet.
+D0–D7 complete: supervisor, embedded bun backend, native MCP/SSE client, native
+control plane, Keychain + notifications, egress-on-by-default (Gate 2 = 20/20),
+hardened dev-signed `.app` + `.dmg`. A **notarized** release awaits a Developer ID
+signature (NOTARIZATION.md). Windows/Linux stay console-only — this app is a
+macOS-exclusive face on the same backend.
