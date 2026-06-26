@@ -41,7 +41,17 @@ export class ControlPlaneServer {
   private readonly sseClients = new Set<ServerResponse>();
   private readonly sessions = new Map<string, SessionView>();
   private readonly traces: TraceMetricsSummary[] = [];
-  /** Full traces kept for the replay viewer (ring-buffered). */
+  /**
+   * Full, un-redacted traces for the operator's replay viewer.
+   *
+   * RETENTION (GDPR): in-memory ONLY — never written to disk or a DB, lost on
+   * process restart — and ring-buffered to the most recent 50 (oldest evicted).
+   * The only DURABLE trace sink is Svod, which is PII-redacted at emit (P1.1);
+   * the full-fidelity copy here is ephemeral and bounded, and the /replay reads
+   * that expose it require the control-plane bearer token. So redaction is the
+   * complete durable-PII solution — the full trace does not migrate to another
+   * persistent store.
+   */
   private readonly fullTraces = new Map<string, SessionTrace>();
   readonly inbox: ApprovalInbox;
   readonly policy: PolicyEditor;
@@ -146,7 +156,13 @@ export class ControlPlaneServer {
     // State-changing routes require a bearer token when one is configured. The
     // token is NOT an ambient credential (no cookie), so a cross-origin page
     // cannot forge it — this closes both the open-approval hole and CSRF.
-    if (this.authToken && method !== "GET") {
+    //
+    // The /replay reads are an exception to the "GET is open" rule: they serve
+    // the FULL, un-redacted trace (page text, typed values — PII). Unlike the
+    // redacted Svod copy, this is the operator's full-fidelity view, so it must
+    // require the token too — otherwise the one PII surface bypasses auth.
+    const isPiiRead = method === "GET" && (path === "/replay" || path.startsWith("/replay/"));
+    if (this.authToken && (method !== "GET" || isPiiRead)) {
       const auth = req.headers["authorization"];
       if (auth !== `Bearer ${this.authToken}`) {
         res.writeHead(401, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "unauthorized" }));
