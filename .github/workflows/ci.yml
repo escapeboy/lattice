@@ -63,6 +63,10 @@ jobs:
         working-directory: apps/desktop-macos
         run: swift build -c release
 
+      - name: Test Swift (supervisor; backend integration tests opt-in)
+        working-directory: apps/desktop-macos
+        run: swift test
+
       - name: Assemble .app bundle (Swift + bun backend)
         working-directory: apps/desktop-macos
         run: ./Scripts/make-app.sh release

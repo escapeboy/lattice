@@ -6,15 +6,25 @@ import PackageDescription
 // app talks to it over the existing localhost MCP/HTTP/SSE interface and, at
 // runtime, supervises it as a child process tree.
 //
-// Built as a SwiftPM executable (opens in Xcode, builds headlessly on CI via
-// `swift build`). The `.app` bundle is assembled by Scripts/make-app.sh.
+// Split into a testable `LatticeKit` library (supervisor, MCP client, view
+// models, views) and a thin `Lattice` executable (just the @main App + scene).
 let package = Package(
     name: "Lattice",
     platforms: [.macOS(.v13)],
     targets: [
+        .target(
+            name: "LatticeKit",
+            path: "Sources/LatticeKit"
+        ),
         .executableTarget(
             name: "Lattice",
+            dependencies: ["LatticeKit"],
             path: "Sources/Lattice"
-        )
+        ),
+        .testTarget(
+            name: "LatticeKitTests",
+            dependencies: ["LatticeKit"],
+            path: "Tests/LatticeKitTests"
+        ),
     ]
 )
