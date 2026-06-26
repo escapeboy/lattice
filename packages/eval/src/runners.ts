@@ -13,7 +13,7 @@
  * naively caches refs (the failure mode Lattice's stable id prevents).
  */
 
-import { snapshotToIG, igDelta } from "@lattice/perception";
+import { snapshotToIG, igDelta, compactNodes, compactDelta } from "@lattice/perception";
 import type { SnapshotIG } from "@lattice/perception";
 import { estimateTokens } from "./tokens.js";
 import { loadFrame, refByLabel } from "./fixtures.js";
@@ -43,8 +43,11 @@ function lineDiffTokens(prev: string, next: string): number {
   return estimateTokens(added.join("\n"));
 }
 
+// The COMPACT projection is the agent-facing wire shape (role + label, acted on
+// by stable NodeId) — the same shape the gateway ships. We measure that, not the
+// full internal node, because that is what the agent actually pays tokens for.
 function serializeIG(ig: SnapshotIG): string {
-  return JSON.stringify([...ig.graph.nodes.values()]);
+  return JSON.stringify(compactNodes(ig.graph.nodes.values()));
 }
 
 export function runScenario(scenario: Scenario): ScenarioResult {
@@ -59,7 +62,7 @@ export function runScenario(scenario: Scenario): ScenarioResult {
     const f = frames[i]!;
     abFullTokens += estimateTokens(f.snapshotText);
     abDiffTokens += i === 0 ? estimateTokens(f.snapshotText) : lineDiffTokens(frames[i - 1]!.snapshotText, f.snapshotText);
-    latticeTokens += i === 0 ? estimateTokens(serializeIG(igs[i]!)) : estimateTokens(JSON.stringify(igDelta(igs[i - 1]!.graph, igs[i]!.graph)));
+    latticeTokens += i === 0 ? estimateTokens(serializeIG(igs[i]!)) : estimateTokens(JSON.stringify(compactDelta(igDelta(igs[i - 1]!.graph, igs[i]!.graph))));
   }
 
   // ── action resolution / accuracy ────────────────────────────────────────────
