@@ -427,6 +427,28 @@ describeIfBrowser("GatewayServer — browser integration", () => {
     await client.callTool({ name: "session_destroy", arguments: { sessionId: s3 } });
   });
 
+  it("A5: vault_autofill refuses when the page origin != the credential's bound origin", async () => {
+    const { sessionId } = JSON.parse(toolText(await client.callTool({ name: "session_create", arguments: {} }))) as { sessionId: string };
+    await client.callTool({ name: "act_execute", arguments: { sessionId, command: { type: "navigate", url: serverUrl } } });
+    // Store a credential bound to a DIFFERENT origin than the page we are on.
+    const grant = gateway.mintOperatorGrant({ tool: "vault_store", sessionId: "operator" });
+    const { credentialId } = JSON.parse(toolText(await client.callTool({
+      name: "vault_store",
+      arguments: { grant, label: "Other", origin: "https://other.example", username: "u", password: "p" },
+    }))) as { credentialId: string };
+
+    const snap = JSON.parse(toolText(await client.callTool({ name: "perceive_snapshot", arguments: { sessionId, tier: "L1" } }))) as { nodes: Array<{ id: string; label: string }> };
+    const u = snap.nodes.find((n) => n.label?.toLowerCase().includes("username"))!.id;
+    const p = snap.nodes.find((n) => n.label?.toLowerCase().includes("password"))!.id;
+    const res = JSON.parse(toolText(await client.callTool({
+      name: "vault_autofill",
+      arguments: { sessionId, credentialId, usernameNodeId: u, passwordNodeId: p },
+    }))) as Record<string, unknown>;
+    expect(res["status"]).toBe("blocked");
+    expect(res["reason"]).toBe("origin_mismatch");
+    await client.callTool({ name: "session_destroy", arguments: { sessionId } });
+  });
+
   it("a value read via perceive_snapshot cannot be laundered into an operator write (taint)", async () => {
     const { sessionId } = JSON.parse(toolText(await client.callTool({ name: "session_create", arguments: {} }))) as { sessionId: string };
     await client.callTool({ name: "act_execute", arguments: { sessionId, command: { type: "navigate", url: serverUrl } } });

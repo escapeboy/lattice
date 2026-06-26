@@ -55,6 +55,8 @@ export interface GatewayConfig {
   vault?: Vault;
   /** Lifecycle/trace/grant hooks the unified `serve` wires to the control plane. */
   observer?: GatewayObserver;
+  /** Bearer token required on the /mcp endpoint when set (A2). */
+  mcpToken?: string;
 }
 
 export function createAgentGateway(config: GatewayConfig): GatewayServer {
@@ -63,6 +65,7 @@ export function createAgentGateway(config: GatewayConfig): GatewayServer {
     ...(config.handoffSigningKey ? { handoffSigningKey: config.handoffSigningKey } : {}),
     ...(config.vault ? { vault: config.vault } : {}),
     ...(config.observer ? { observer: config.observer } : {}),
+    ...(config.mcpToken ? { mcpToken: config.mcpToken } : {}),
   });
 }
 
@@ -76,6 +79,8 @@ export interface BuildOnGatewayConfig {
   observer?: GatewayObserver;
   /** Task origin scope passed to the governed build-on sessions. */
   registry?: BuildOnRegistryOptions;
+  /** Bearer token required on the /mcp endpoint when set (A2). */
+  mcpToken?: string;
 }
 
 /**
@@ -91,5 +96,6 @@ export function createBuildOnGateway(config: BuildOnGatewayConfig): GatewayServe
     ...(config.handoffSigningKey ? { handoffSigningKey: config.handoffSigningKey } : {}),
     ...(config.vault ? { vault: config.vault } : {}),
     ...(config.observer ? { observer: config.observer } : {}),
+    ...(config.mcpToken ? { mcpToken: config.mcpToken } : {}),
   });
 }

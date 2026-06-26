@@ -391,6 +391,15 @@ function err(message: string): ToolResult {
   return { content: [{ type: "text", text: `Error: ${message}` }], isError: true };
 }
 
+/** Parse a URL/origin string to its origin, or null if unparseable. */
+function originOf(urlOrOrigin: string): string | null {
+  try {
+    return new URL(urlOrOrigin).origin;
+  } catch {
+    return null;
+  }
+}
+
 function readBody(req: IncomingMessage): Promise<string | null> {
   return new Promise((resolve) => {
     const chunks: Buffer[] = [];
@@ -413,6 +422,8 @@ export class GatewayServer {
   private readonly sessions: SessionProvider;
   private readonly vault: Vault;
   private readonly kernel: SecurityKernel;
+  /** Bearer token gating the /mcp endpoint, or null when unauthenticated (A2). */
+  private readonly mcpToken: string | null;
   private readonly operatorStore: OperatorStore;
   private readonly handoff: HandoffManager;
   private readonly notificationTransport: NotificationTransport;
@@ -436,9 +447,12 @@ export class GatewayServer {
       observer?: GatewayObserver;
       /** Build-on (or any) session backend; defaults to the CDP SessionRegistry. */
       sessionProvider?: SessionProvider;
+      /** Bearer token required on the /mcp endpoint when set (A2). */
+      mcpToken?: string;
     },
   ) {
     this.kernel = kernel;
+    this.mcpToken = opts?.mcpToken ?? null;
     // Dual-stack: an injected provider (build-on) overrides the default CDP
     // registry. The CDP path is byte-identical when no provider is given.
     if (opts?.sessionProvider) {
@@ -820,6 +834,19 @@ export class GatewayServer {
           return err(`Credential ${credId} not found`);
         }
 
+        // A5: origin-binding. A credential is typed ONLY into a page on its own
+        // origin — never onto a look-alike / attacker page the agent was lured
+        // to. Without this a stolen-credential exfil is one navigation away.
+        const credOrigin = this.vault.getOrigin(credId);
+        const pageOrigin = originOf(session.context.currentUrl());
+        if (credOrigin && originOf(credOrigin) !== pageOrigin) {
+          return ok({
+            status: "blocked",
+            reason: "origin_mismatch",
+            detail: `credential is bound to ${credOrigin}; current page origin is ${pageOrigin ?? "unknown"}`,
+          });
+        }
+
         // Fill username field
         await session.action.execute({
           type: "fill",
@@ -1146,6 +1173,19 @@ export class GatewayServer {
       res.writeHead(404, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ error: "Not found. MCP endpoint is /mcp" }));
       return;
+    }
+
+    // A2: the /mcp endpoint serves the full agent tool surface (incl. page
+    // content via perceive/session_observe). When a token is configured it is
+    // REQUIRED — an unauthenticated client must not reach any tool. /health
+    // stays open above.
+    if (this.mcpToken) {
+      const auth = req.headers["authorization"];
+      if (auth !== `Bearer ${this.mcpToken}`) {
+        res.writeHead(401, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ error: "unauthorized" }));
+        return;
+      }
     }
 
     const sessionId = req.headers["mcp-session-id"];

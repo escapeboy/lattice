@@ -209,18 +209,23 @@ export class SecurityKernelImpl implements SecurityKernel {
 
   checkEgress(req: EgressRequest): boolean {
     let allowed: boolean;
+    // Provenance (A4): a destination is content-proposed when its source is not
+    // the task scope. A same-origin destination is allowed regardless (legitimate
+    // forms post to their own origin); a CROSS-origin destination is allowed only
+    // if explicitly allowlisted — so a content-proposed off-origin exfil target is
+    // blocked. The sourceOrigin is consulted (not a dead field) and audited.
+    const contentProposed = req.sourceOrigin !== req.taskOrigin;
     try {
       const dest = new URL(req.destination);
       const destOrigin = dest.origin;
       const taskOrigin = req.taskOrigin;
 
-      // Allow if destination origin matches task origin
       if (destOrigin === taskOrigin) {
-        allowed = true;
+        allowed = true; // same-origin — legitimate forms/fetch
       } else if (this.config.egressAllowlist.includes(destOrigin)) {
-        allowed = true;
+        allowed = true; // explicitly allowlisted cross-origin
       } else {
-        allowed = false;
+        allowed = false; // cross-origin, not allowlisted (incl. all content-proposed exfil)
       }
     } catch {
       // Malformed URL
@@ -231,7 +236,7 @@ export class SecurityKernelImpl implements SecurityKernel {
       kind: "egress",
       origin: req.sourceOrigin,
       sessionId: req.sessionId,
-      detail: `egress ${allowed ? "allowed" : "blocked"}: ${req.destination}`,
+      detail: `egress ${allowed ? "allowed" : "blocked"} (${contentProposed ? "content-proposed" : "task-proposed"}): ${req.destination}`,
       granted: allowed,
     });
 

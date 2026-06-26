@@ -82,6 +82,11 @@ export class Vault {
     return this.entries.get(id)?.username;
   }
 
+  /** The origin a credential is bound to — autofill must match it (A5). */
+  getOrigin(id: string): string | undefined {
+    return this.entries.get(id)?.origin;
+  }
+
   has(id: string): boolean {
     return this.entries.has(id);
   }

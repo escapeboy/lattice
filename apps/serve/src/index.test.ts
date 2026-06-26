@@ -9,7 +9,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createEngineAdapter, detectChromiumExecutable } from "@lattice/engine";
 import { SecurityKernelImpl } from "@lattice/kernel";
-import { createLatticeCore } from "./index.js";
+import { createLatticeCore, resolveEngineKind } from "./index.js";
 
 function jsonOf(res: { [x: string]: unknown }): Record<string, unknown> {
   const content = (res as { content: Array<{ type: string; text: string }> }).content;
@@ -175,6 +175,15 @@ describe("LatticeCore — engineKind selection (ADR 0002)", () => {
     const kernel = new SecurityKernelImpl({ allowedOrigins: [], egressAllowlist: [], prohibitedActions: [] });
     expect(() => createLatticeCore({ engineKind: "agent-browser", kernel })).toThrow(/buildOnEngine/);
     expect(() => createLatticeCore({ engineKind: "cdp", kernel })).toThrow(/engine/);
+  });
+
+  // A1: the default deployment must be the firewalled build-on stack.
+  it("resolveEngineKind defaults to build-on; only explicit 'cdp' selects the raw stack", () => {
+    expect(resolveEngineKind(undefined)).toBe("agent-browser");
+    expect(resolveEngineKind("")).toBe("agent-browser");
+    expect(resolveEngineKind("agent-browser")).toBe("agent-browser");
+    expect(resolveEngineKind("anything-else")).toBe("agent-browser");
+    expect(resolveEngineKind("cdp")).toBe("cdp"); // explicit, dev-only opt-in
   });
 });
 
