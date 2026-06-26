@@ -52,7 +52,40 @@ export const FIREWALLED_GET_TARGETS: ReadonlySet<string> = new Set(["cdp-url"]);
  * schemes are refused on ANY argument, regardless of subcommand or task policy
  * (constitutional floor — local file read is never an agent primitive).
  */
-const FIREWALLED_URL_SCHEME = /^\s*(file|javascript|blob|filesystem|view-source|chrome|chrome-extension):/i;
+export const FORBIDDEN_URL_SCHEMES: ReadonlySet<string> = new Set([
+  "file",
+  "javascript",
+  "blob",
+  "filesystem",
+  "view-source",
+  "chrome",
+  "chrome-extension",
+]);
+
+/**
+ * Return the forbidden scheme of `raw`, or null if its scheme is not forbidden.
+ *
+ * Critically, this canonicalizes the SAME way the WHATWG URL parser (Chromium /
+ * agent-browser) does BEFORE reading the scheme: it removes every ASCII tab
+ * (0x09), LF (0x0A) and CR (0x0D) anywhere in the string, then strips leading C0
+ * controls + space (code point <= 0x20). Without this, an obfuscated scheme such
+ * as a tab inside "file" or a leading NUL slips past a naive prefix check while
+ * the engine still resolves it to "file:". (Confirmed against the WHATWG parser.)
+ * Implemented with char codes so no control characters appear in this source.
+ */
+export function forbiddenUrlScheme(raw: string): string | null {
+  let s = "";
+  for (let i = 0; i < raw.length; i++) {
+    const c = raw.charCodeAt(i);
+    if (c !== 0x09 && c !== 0x0a && c !== 0x0d) s += raw[i];
+  }
+  let start = 0;
+  while (start < s.length && s.charCodeAt(start) <= 0x20) start++;
+  const colon = s.indexOf(":", start);
+  if (colon < 0) return null;
+  const scheme = s.slice(start, colon).toLowerCase();
+  return FORBIDDEN_URL_SCHEMES.has(scheme) ? scheme : null;
+}
 
 /**
  * Throw EngineFirewallError if `subcommand`/`args` would invoke a firewalled
@@ -72,8 +105,9 @@ export function assertNotFirewalled(subcommand: string, args: readonly string[])
     const flag = a.includes("=") ? a.slice(0, a.indexOf("=")) : a;
     if (FIREWALLED_FLAGS.has(flag)) throw new EngineFirewallError(flag);
     // A local-file / sandbox-escaping URL on any positional arg (e.g. the URL
-    // passed to `open`/`read`) — the actual file-read primitive, flagless.
-    const scheme = FIREWALLED_URL_SCHEME.exec(a);
-    if (scheme) throw new EngineFirewallError(`${scheme[1]}: url`);
+    // passed to `open`/`read`) — the actual file-read primitive, flagless. The
+    // scheme is canonicalized to defeat tab/newline/control-char obfuscation.
+    const scheme = forbiddenUrlScheme(a);
+    if (scheme) throw new EngineFirewallError(`${scheme}: url`);
   }
 }

@@ -175,7 +175,7 @@ export class SecurityKernelImpl implements SecurityKernel {
     // unconditionally — BEFORE the empty-allowlist short-circuit — so an
     // `open file:///etc/passwd` is blocked even under the unrestricted dev
     // default. This is not policy-editable.
-    if (/^\s*(file|javascript|blob|filesystem|view-source|chrome|chrome-extension):/i.test(targetUrl)) {
+    if (hasForbiddenScheme(targetUrl)) {
       this.emit({
         kind: "policy",
         origin: "task",
@@ -320,4 +320,36 @@ export class SecurityKernelImpl implements SecurityKernel {
 function replaceInPlace(target: string[], next: string[]): void {
   target.length = 0;
   target.push(...next);
+}
+
+const FORBIDDEN_NAV_SCHEMES = new Set([
+  "file",
+  "javascript",
+  "blob",
+  "filesystem",
+  "view-source",
+  "chrome",
+  "chrome-extension",
+]);
+
+/**
+ * True if `url`'s scheme reads local files or escapes the page sandbox.
+ *
+ * Canonicalizes the SAME way the WHATWG URL parser (the browser engine) does
+ * BEFORE reading the scheme: removes every ASCII tab (0x09), LF (0x0A) and CR
+ * (0x0D) anywhere, then strips leading C0 controls + space (<= 0x20). A naive
+ * regex misses `fi\tle://` / leading-NUL forms the engine still resolves to
+ * `file:`. Implemented with char codes so no control characters appear here.
+ */
+function hasForbiddenScheme(url: string): boolean {
+  let s = "";
+  for (let i = 0; i < url.length; i++) {
+    const c = url.charCodeAt(i);
+    if (c !== 0x09 && c !== 0x0a && c !== 0x0d) s += url[i];
+  }
+  let start = 0;
+  while (start < s.length && s.charCodeAt(start) <= 0x20) start++;
+  const colon = s.indexOf(":", start);
+  if (colon < 0) return false;
+  return FORBIDDEN_NAV_SCHEMES.has(s.slice(start, colon).toLowerCase());
 }

@@ -189,6 +189,17 @@ describe("@lattice/kernel — origin scoping (navigation)", () => {
     expect(k.checkNavigation("https://anywhere.example/x")).toBe(true);
     expect(k.checkNavigation("data:text/html,<h1>x</h1>")).toBe(true);
   });
+
+  it("blocks tab/newline/control-char-obfuscated file: that the URL parser normalizes (review bypass)", () => {
+    const k = createSecurityKernel({ ...defaultConfig, allowedOrigins: [] });
+    expect(k.checkNavigation("fi\tle:///etc/passwd")).toBe(false); // tab in scheme
+    expect(k.checkNavigation("fi\nle:///etc/passwd")).toBe(false); // newline in scheme
+    expect(k.checkNavigation("file\t:///etc/passwd")).toBe(false); // tab before colon
+    expect(k.checkNavigation("FILE:///etc/passwd")).toBe(false); // uppercase
+    expect(k.checkNavigation("  file:///etc/passwd")).toBe(false); // leading whitespace
+    // Legit navigation with no forbidden scheme still passes.
+    expect(k.checkNavigation("https://example.com/path")).toBe(true);
+  });
 });
 
 describe("@lattice/kernel — audit log", () => {
