@@ -10,6 +10,7 @@ import { describe, it, expect } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { createSecurityKernel } from "@lattice/kernel";
+import { AgentBrowserEngine } from "@lattice/engine-adapter";
 import { createBuildOnGateway } from "./index.js";
 import type {
   SemanticEngine,
@@ -149,4 +150,39 @@ describe("build-on gateway — external MCP client drives the build-on stack (S6
     await client.close();
     await gateway.stop();
   });
+});
+
+// ── Live: full production path MCP → gateway → build-on → real Chrome (opt-in) ─
+
+const live = process.env["LATTICE_LIVE_ENGINE"] === "1" ? describe : describe.skip;
+
+live("build-on gateway — LIVE over real agent-browser (S6 DoD)", () => {
+  it("an MCP client drives navigate → perceive → act against real Chrome", async () => {
+    const engine = new AgentBrowserEngine({ timeoutMs: 60_000 });
+    await engine.launch();
+    const kernel = createSecurityKernel({ allowedOrigins: [], egressAllowlist: [], prohibitedActions: [] });
+    const gateway = createBuildOnGateway({ engine, kernel });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await gateway.getMCPServer().connect(st);
+    const client = new Client({ name: "live", version: "0.0.1" });
+    await client.connect(ct);
+    try {
+      const { sessionId } = toolJson(await client.callTool({ name: "session_create", arguments: {} })) as { sessionId: string };
+      await client.callTool({
+        name: "act_execute",
+        arguments: { sessionId, command: { type: "navigate", url: "data:text/html,<form><input aria-label=Email><button>Go</button></form>" } },
+      });
+      const snap = toolJson(await client.callTool({ name: "perceive_snapshot", arguments: { sessionId, tier: "L1" } }));
+      const nodes = snap["nodes"] as Array<{ role: string; id: string }>;
+      expect(nodes.map((n) => n.role)).toContain("button");
+
+      const emailId = nodes.find((n) => n.role === "input")!.id;
+      const fill = toolJson(await client.callTool({ name: "act_execute", arguments: { sessionId, command: { type: "fill", target: { nodeId: emailId }, value: "ada@x.com" } } }));
+      expect(fill["success"]).toBe(true);
+    } finally {
+      await client.close();
+      await gateway.stop();
+      await engine.shutdown();
+    }
+  }, 90_000);
 });
