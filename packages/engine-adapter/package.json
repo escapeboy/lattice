@@ -1,5 +1,5 @@
 {
-  "name": "@lattice/action",
+  "name": "@lattice/engine-adapter",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -14,15 +14,12 @@
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
-  "dependencies": {
-    "@lattice/engine": "workspace:*",
-    "@lattice/engine-adapter": "workspace:*",
-    "@lattice/kernel": "workspace:*",
-    "@lattice/perception": "workspace:*"
-  },
   "devDependencies": {
     "@types/node": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
+  },
+  "dependencies": {
+    "agent-browser": "0.31.0"
   }
 }

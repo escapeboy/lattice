@@ -15,6 +15,21 @@ import type { SessionTrace } from "@lattice/observability";
 
 export type SessionTopology = "ephemeral" | "persistent";
 
+/**
+ * The session surface GatewayServer depends on. Both the CDP SessionRegistry and
+ * the build-on registry (ADR 0002) implement it, so the server drives either
+ * engine unchanged (dual-stack).
+ */
+export interface SessionProvider {
+  create(topology?: SessionTopology, personaId?: string): Promise<GatewaySession>;
+  get(id: string): GatewaySession | undefined;
+  destroy(id: string): Promise<SessionTrace | undefined>;
+  list(): string[];
+  activeCount(): number;
+  importPersona(personaId: string, cookies: SnapshotData["cookies"]): number;
+  destroyAll(): Promise<void>;
+}
+
 export interface GatewaySession {
   readonly id: string;
   readonly context: ContextHandle;
@@ -38,7 +53,7 @@ const DEFAULT_BUDGET: ResourceBudget = { maxContexts: 50, maxMemoryMb: 4096, max
  * budget (the governor), and `persistent` personas keep their cookies/storage
  * across sessions (snapshot on teardown, restore on re-create).
  */
-export class SessionRegistry {
+export class SessionRegistry implements SessionProvider {
   private readonly sessions = new Map<string, GatewaySession>();
   private readonly scheduler: RuntimeSchedulerImpl;
   /** Per-persona saved state, keyed by personaId (persistent topology). */

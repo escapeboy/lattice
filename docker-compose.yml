@@ -13,6 +13,10 @@ services:
       LATTICE_PORT: "8765"
       LATTICE_HOST: "0.0.0.0"
       LATTICE_TRANSPORT: "http"
+      # Engine: "cdp" (default, system Chromium) or "agent-browser" (build-on,
+      # ADR 0002 — downloads its own Chrome for Testing on first run).
+      LATTICE_ENGINE: "${LATTICE_ENGINE:-cdp}"
+      LATTICE_DEVICE: "${LATTICE_DEVICE:-}"
       # Security policy — tighten these for your deployment.
       LATTICE_ALLOWED_ORIGINS: "${LATTICE_ALLOWED_ORIGINS:-}"
       LATTICE_EGRESS_ALLOWLIST: "${LATTICE_EGRESS_ALLOWLIST:-}"

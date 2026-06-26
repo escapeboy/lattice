@@ -21,7 +21,8 @@ A pnpm monorepo of focused packages:
 
 | Package | Responsibility |
 |---|---|
-| `@lattice/engine` | CDP adapter over `playwright-core` — isolated contexts, navigation, teardown. |
+| `@lattice/engine` | CDP adapter over `playwright-core` — isolated contexts, navigation, teardown (default engine). |
+| `@lattice/engine-adapter` | **Build-on engine (ADR 0002):** [agent-browser](https://agent-browser.dev) wrapped behind a narrow semantic port, **internal-only**, with the kernel-bypass primitives (`eval`/raw-CDP/file/profile) firewalled. See [SECURITY.md](./SECURITY.md). |
 | `@lattice/perception` | Interaction Graph from DOM + Accessibility tree + layout. Stable node identity, fidelity tiers **L0/L1/L2/L3**, deltas. |
 | `@lattice/action` | Semantic actions (`navigate`/`act`/`fill`/`select`/`submit`/`extract`/…) over **trusted** CDP Input, with engine-owned settling. |
 | `@lattice/runtime` | Scheduler + resource governor for N concurrent contexts; ephemeral/persistent topologies; fan-out. |
@@ -93,6 +94,26 @@ curl -fsS http://localhost:8765/health     # {"status":"ok",...}
 
 Put a TLS-terminating reverse proxy (Caddy/nginx) in front for public exposure.
 Headless Chromium needs a large `/dev/shm`; the compose file sets `shm_size: 1gb`.
+
+### Engine selection — CDP vs build-on (ADR 0002)
+
+Lattice runs on either engine, selected at boot — a **dual-stack** migration so
+the proven CDP path stays the default while the build-on path reaches parity:
+
+```bash
+# Default: CDP over playwright-core (needs a local Chromium).
+node apps/serve/dist/main.js
+
+# Build-on: agent-browser as an internal engine (downloads Chrome for Testing).
+LATTICE_ENGINE=agent-browser node apps/serve/dist/main.js
+LATTICE_ENGINE=agent-browser LATTICE_DEVICE="iPhone 15 Pro" node apps/serve/dist/main.js   # mobile
+```
+
+Same MCP surface, same tools, same kernel — only the engine substrate differs.
+On the build-on path the agent reaches agent-browser **only** through the
+governed gateway; `eval`, raw CDP, file and profile access are firewalled (see
+[SECURITY.md](./SECURITY.md)). The WebMCP capability probe needs `eval`, so on
+build-on it degrades to semantic fallback rather than exposing a CDP surface.
 
 ### Unified process — `lattice serve`
 
@@ -248,3 +269,17 @@ perceive→act→extract cycle over MCP; injection/egress/gating tests pass; tra
 land in Svod; the self-hosted Docker gateway runs. The next decision point is
 **P3** — the native Chromium fork — which is a deliberate, human-gated step and
 is not started automatically.
+
+**Build-on engine (ADR 0002):** the engine layer also runs on
+[agent-browser](https://agent-browser.dev) (Apache-2.0), wrapped internal-only
+behind the governed `BuildOnSession` and selected with `LATTICE_ENGINE=agent-browser`.
+Lattice adds what agent-browser lacks — cross-mutation stable identity (their
+refs are per-snapshot), taint-per-node, streamed deltas, the Security Kernel,
+the operator surface, traces, control plane, and human handoff. The agent's only
+door is the MCP gateway; agent-browser's kernel-bypass primitives are firewalled.
+See [SECURITY.md](./SECURITY.md) and the `NOTICE` for attribution.
+
+## License & attribution
+
+Apache-2.0 (see [LICENSE](./LICENSE)). Builds on agent-browser (Apache-2.0,
+pinned 0.31.0), used unmodified as an internal engine — see [NOTICE](./NOTICE).

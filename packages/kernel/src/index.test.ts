@@ -176,6 +176,37 @@ describe("@lattice/kernel — origin scoping (navigation)", () => {
     const k = createSecurityKernel({ ...defaultConfig, allowedOrigins: ["https://app.example.com"] });
     expect(k.checkNavigation("not a url")).toBe(false);
   });
+
+  it("blocks file:// and other sandbox-escaping schemes UNCONDITIONALLY (floor, even unrestricted)", () => {
+    // Empty allowlist = unrestricted dev default, yet file:/javascript:/blob:
+    // must still be refused — this is the local-file-exfil floor.
+    const k = createSecurityKernel({ ...defaultConfig, allowedOrigins: [] });
+    expect(k.checkNavigation("file:///etc/passwd")).toBe(false);
+    expect(k.checkNavigation("javascript:fetch('/x')")).toBe(false);
+    expect(k.checkNavigation("blob:https://x/abc")).toBe(false);
+    expect(k.checkNavigation("view-source:file:///etc/passwd")).toBe(false);
+    // Legitimate web + schemeless contexts still pass under the unrestricted default.
+    expect(k.checkNavigation("https://anywhere.example/x")).toBe(true);
+    expect(k.checkNavigation("data:text/html,<h1>x</h1>")).toBe(true);
+  });
+
+  it("blocks tab/newline/control-char-obfuscated file: that the URL parser normalizes (review bypass)", () => {
+    const k = createSecurityKernel({ ...defaultConfig, allowedOrigins: [] });
+    expect(k.checkNavigation("fi\tle:///etc/passwd")).toBe(false); // tab in scheme
+    expect(k.checkNavigation("fi\nle:///etc/passwd")).toBe(false); // newline in scheme
+    expect(k.checkNavigation("file\t:///etc/passwd")).toBe(false); // tab before colon
+    expect(k.checkNavigation("FILE:///etc/passwd")).toBe(false); // uppercase
+    expect(k.checkNavigation("  file:///etc/passwd")).toBe(false); // leading whitespace
+    // Control/space INSIDE the scheme that a lenient resolver strips back to file:
+    const c = String.fromCharCode;
+    expect(k.checkNavigation("fi le:///etc/passwd")).toBe(false); // space in scheme
+    expect(k.checkNavigation("fi" + c(0x0c) + "le:///etc/passwd")).toBe(false); // form feed
+    expect(k.checkNavigation("fi" + c(0x00) + "le:///etc/passwd")).toBe(false); // NUL
+    expect(k.checkNavigation("devtools://devtools/x")).toBe(false); // privileged scheme
+    // Legit navigation with no forbidden scheme still passes.
+    expect(k.checkNavigation("https://example.com/path")).toBe(true);
+    expect(k.checkNavigation("https://example.com/a?q=x y")).toBe(true); // space in query is fine
+  });
 });
 
 describe("@lattice/kernel — audit log", () => {

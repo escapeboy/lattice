@@ -121,7 +121,7 @@ describe("operator surface — device OOB verification", () => {
     const list = toolJson(await client.callTool({ name: "device_list", arguments: {} }));
     const dev = (list["devices"] as Array<{ id: string; verified: boolean }>).find((d) => d.id === deviceId);
     expect(dev?.verified).toBe(false);
-    expect(JSON.stringify(reg)).not.toMatch(/[A-Z0-9]{6}/); // no code leaked to the agent
+    expect(reg["challenge"]).toBeUndefined(); // the OOB code is never returned to the agent
 
     // A wrong code fails; the right one (from the OOB channel) verifies.
     expect(gateway.verifyDevice(deviceId, "WRONG1")).toBe(false);

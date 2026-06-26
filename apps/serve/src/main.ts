@@ -15,6 +15,7 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { createEngineAdapter, detectChromiumExecutable } from "@lattice/engine";
+import { AgentBrowserEngine } from "@lattice/engine-adapter";
 import { SecurityKernelImpl } from "@lattice/kernel";
 import { NtfyTransport, Vault } from "@lattice/gateway";
 import { createLatticeCore } from "./index.js";
@@ -28,15 +29,28 @@ async function main(): Promise<void> {
   const gwHost = process.env["LATTICE_HOST"] ?? "0.0.0.0";
   const cpPort = Number(process.env["CONTROL_PLANE_PORT"] ?? "7900");
 
-  const executablePath = detectChromiumExecutable();
-  if (!executablePath) {
-    console.error("No Chromium found. Set CHROME_EXECUTABLE or install Chrome.");
-    process.exitCode = 1;
-    return;
-  }
+  // Engine selection (ADR 0002): LATTICE_ENGINE=agent-browser runs the build-on
+  // stack (agent-browser behind the governed session); default is the CDP stack.
+  const engineKind = process.env["LATTICE_ENGINE"] === "agent-browser" ? "agent-browser" : "cdp";
 
-  const engine = createEngineAdapter();
-  await engine.launch({ headless: true, executablePath });
+  let cdpEngine: ReturnType<typeof createEngineAdapter> | undefined;
+  let buildOnEngine: AgentBrowserEngine | undefined;
+  if (engineKind === "agent-browser") {
+    buildOnEngine = new AgentBrowserEngine();
+    await buildOnEngine.launch({
+      headed: process.env["LATTICE_HEADED"] === "1",
+      ...(process.env["LATTICE_DEVICE"] ? { device: process.env["LATTICE_DEVICE"] } : {}),
+    });
+  } else {
+    const executablePath = detectChromiumExecutable();
+    if (!executablePath) {
+      console.error("No Chromium found. Set CHROME_EXECUTABLE or install Chrome (or LATTICE_ENGINE=agent-browser).");
+      process.exitCode = 1;
+      return;
+    }
+    cdpEngine = createEngineAdapter();
+    await cdpEngine.launch({ headless: true, executablePath });
+  }
 
   const kernel = new SecurityKernelImpl({
     allowedOrigins: list(process.env["LATTICE_ALLOWED_ORIGINS"]),
@@ -59,7 +73,9 @@ async function main(): Promise<void> {
 
   const cpToken = process.env["LATTICE_CP_TOKEN"];
   const { gateway, control } = createLatticeCore({
-    engine,
+    engineKind,
+    ...(cdpEngine ? { engine: cdpEngine } : {}),
+    ...(buildOnEngine ? { buildOnEngine } : {}),
     kernel,
     vault: new Vault(vaultKey, vaultPath),
     traceWriter,
@@ -72,7 +88,8 @@ async function main(): Promise<void> {
     void (async () => {
       await gateway.stop();
       await control.stop();
-      await engine.shutdown();
+      await cdpEngine?.shutdown();
+      await buildOnEngine?.shutdown();
       process.exit(0);
     })();
   };

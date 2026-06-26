@@ -171,6 +171,20 @@ export class SecurityKernelImpl implements SecurityKernel {
   }
 
   checkNavigation(targetUrl: string): boolean {
+    // Constitutional floor: local-file / sandbox-escaping schemes are refused
+    // unconditionally — BEFORE the empty-allowlist short-circuit — so an
+    // `open file:///etc/passwd` is blocked even under the unrestricted dev
+    // default. This is not policy-editable.
+    if (hasForbiddenScheme(targetUrl)) {
+      this.emit({
+        kind: "policy",
+        origin: "task",
+        sessionId: "navigation",
+        detail: `navigation blocked (forbidden scheme): ${targetUrl.slice(0, 80)}`,
+        granted: false,
+      });
+      return false;
+    }
     // Empty allowlist = unrestricted (dev default). Schemeless contexts
     // (data:, about:, blank) carry no origin and are always allowed.
     if (this.config.allowedOrigins.length === 0) return true;
@@ -306,4 +320,37 @@ export class SecurityKernelImpl implements SecurityKernel {
 function replaceInPlace(target: string[], next: string[]): void {
   target.length = 0;
   target.push(...next);
+}
+
+const FORBIDDEN_NAV_SCHEMES = new Set([
+  "file",
+  "javascript",
+  "blob",
+  "filesystem",
+  "view-source",
+  "chrome",
+  "chrome-extension",
+  "chrome-untrusted",
+  "devtools",
+]);
+
+/**
+ * True if `url`'s scheme reads local files or escapes the page sandbox.
+ *
+ * Canonicalizes to a STRICT SUPERSET of any URL resolver before reading the
+ * scheme: removes EVERY code point <= 0x20 (all C0 controls + space) anywhere.
+ * The WHATWG parser strips tab/newline + leading control/space; Chromium's
+ * lenient fixup may also strip control/space from inside the scheme. So
+ * `fi\tle://`, `fi<FF>le://`, `fi<space>le://`, leading NUL — anything a
+ * downstream resolver could canonicalize to `file:` — is caught, without
+ * false-blocking http/https/data/about. Char codes only (no control chars here).
+ */
+function hasForbiddenScheme(url: string): boolean {
+  let s = "";
+  for (let i = 0; i < url.length; i++) {
+    if (url.charCodeAt(i) > 0x20) s += url[i];
+  }
+  const colon = s.indexOf(":");
+  if (colon < 0) return false;
+  return FORBIDDEN_NAV_SCHEMES.has(s.slice(0, colon).toLowerCase());
 }
