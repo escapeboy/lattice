@@ -25,11 +25,17 @@ apps/desktop-macos/
 ## Build & run (local dev)
 
 ```bash
+pnpm build                   # at repo root: produces apps/serve/dist (backend source)
 cd apps/desktop-macos
-swift build                 # compile
-./Scripts/make-app.sh        # → build/Lattice.app (ad-hoc dev-signed)
+./Scripts/make-app.sh        # swift build + bun backend → build/Lattice.app
 open build/Lattice.app       # menubar icon appears
 ```
+
+`make-app.sh` runs `build-backend.sh`, which bun-compiles the gateway/control-plane
+into a single `lattice-backend` executable and stages the agent-browser native
+engine beside it, then embeds the whole thing under `Contents/Resources/backend/`
+(pinned versions in `backend/VERSIONS`). Set `LATTICE_SKIP_BACKEND=1` to skip the
+backend build for fast UI-only iteration.
 
 Developer ID signing + notarization (D7) is **not** done here — that requires the
 user's signing identity. The script ad-hoc signs only, which is enough to launch

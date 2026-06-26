@@ -40,10 +40,29 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.2.18
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build TS (produces apps/serve/dist)
+        run: pnpm build
+
       - name: Build Swift app
         working-directory: apps/desktop-macos
         run: swift build -c release
 
-      - name: Assemble .app bundle
+      - name: Assemble .app bundle (Swift + bun backend)
         working-directory: apps/desktop-macos
         run: ./Scripts/make-app.sh release
