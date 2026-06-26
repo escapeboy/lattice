@@ -57,6 +57,7 @@ async function main(): Promise<void> {
     await writeFile(abs, content, "utf8");
   };
 
+  const cpToken = process.env["LATTICE_CP_TOKEN"];
   const { gateway, control } = createLatticeCore({
     engine,
     kernel,
@@ -64,6 +65,7 @@ async function main(): Promise<void> {
     traceWriter,
     ...(ntfyBase ? { handoffTransport: new NtfyTransport(ntfyBase) } : {}),
     ...(handoffKey ? { handoffSigningKey: handoffKey } : {}),
+    ...(cpToken ? { controlPlaneToken: cpToken } : {}),
   });
 
   const shutdown = () => {

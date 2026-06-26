@@ -47,11 +47,14 @@ export class ControlPlaneServer {
   readonly policy: PolicyEditor;
   readonly grants: OperatorGrantInbox | null;
   private readonly backend: ControlPlaneBackend | null;
+  /** When set, every state-changing route requires `Authorization: Bearer <token>`. */
+  private readonly authToken: string | null;
 
-  constructor(initial?: Partial<PolicyConfig>, backend?: ControlPlaneBackend) {
+  constructor(initial?: Partial<PolicyConfig>, backend?: ControlPlaneBackend, authToken?: string) {
     this.inbox = new ApprovalInbox();
     this.policy = new PolicyEditor(initial);
     this.backend = backend ?? null;
+    this.authToken = authToken ?? null;
     this.grants = backend ? new OperatorGrantInbox(backend.kernel) : null;
 
     // Forward approval queue changes to SSE clients
@@ -137,8 +140,19 @@ export class ControlPlaneServer {
     const method = req.method?.toUpperCase() ?? "GET";
 
     res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
     if (method === "OPTIONS") { res.writeHead(204).end(); return; }
+
+    // State-changing routes require a bearer token when one is configured. The
+    // token is NOT an ambient credential (no cookie), so a cross-origin page
+    // cannot forge it — this closes both the open-approval hole and CSRF.
+    if (this.authToken && method !== "GET") {
+      const auth = req.headers["authorization"];
+      if (auth !== `Bearer ${this.authToken}`) {
+        res.writeHead(401, { "Content-Type": "application/json" }).end(JSON.stringify({ error: "unauthorized" }));
+        return;
+      }
+    }
 
     if (method === "GET" && path === "/") {
       const serverAddr = this.address();

@@ -421,6 +421,8 @@ export class GatewayServer {
   private httpServer: HttpServer | null = null;
   /** Live MCP transports keyed by mcp-session-id (one per connected agent). */
   private readonly mcpTransports = new Map<string, StreamableHTTPServerTransport>();
+  /** Upper bound on concurrent MCP sessions (anti-DoS for the open endpoint). */
+  private readonly maxMcpSessions = 256;
 
   constructor(
     engine: EngineAdapter,
@@ -665,6 +667,15 @@ export class GatewayServer {
         this.bumpAction(session.id);
         try {
           const result = await session.action.execute(command);
+          // Origin scoping also covers navigation TRIGGERED by an action — a
+          // click on a link or a form submit can change the document origin,
+          // which the pre-check on `navigate` can't see. If the action landed
+          // out of scope, surface it (the persona's cookies must not wander).
+          const landedUrl = result.url ?? session.context.currentUrl();
+          if (!this.kernel.checkNavigation(landedUrl)) {
+            session.recorder.recordActionResult(false, landedUrl, undefined, "origin_out_of_scope");
+            return err(`origin_out_of_scope: the action navigated to ${landedUrl}, outside the task's allowed origins`);
+          }
           session.recorder.recordActionResult(result.success, result.url, result.extracted);
           this.emitSession(session.id);
           return ok({
@@ -723,7 +734,6 @@ export class GatewayServer {
       }
 
       case "capability_list": {
-        this.auditOperatorRead("policy_get"); // benign read; reuse audit kind
         return ok({ origins: this.capabilities.list() });
       }
 
@@ -1069,6 +1079,13 @@ export class GatewayServer {
       }
       // New session: only an `initialize` may open one.
       if (!sid && isInitialize(body)) {
+        // Bound the pool so an unauthenticated client can't allocate transports
+        // without limit (memory DoS). Front this with auth in production.
+        if (this.mcpTransports.size >= this.maxMcpSessions) {
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32000, message: "Too many sessions; retry later" } }));
+          return;
+        }
         const transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => randomUUID(),
           enableJsonResponse: true,

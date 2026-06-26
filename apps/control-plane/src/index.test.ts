@@ -13,6 +13,25 @@ import type { PolicyConfig } from "./types.js";
 
 // ── OperatorGrantInbox — UI and MCP share one grant slice (S8) ───────────────
 
+describe("ControlPlaneServer — auth on state-changing routes", () => {
+  it("mutating routes require the bearer token; reads stay open", async () => {
+    const server = new ControlPlaneServer(undefined, undefined, "secret-token");
+    const { url } = await server.start(0, "127.0.0.1");
+    try {
+      // GET is open.
+      expect((await fetch(`${url}/policy`)).status).toBe(200);
+      // PUT without token → 401.
+      const noAuth = await fetch(`${url}/policy`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: "{}" });
+      expect(noAuth.status).toBe(401);
+      // PUT with token → ok.
+      const withAuth = await fetch(`${url}/policy`, { method: "PUT", headers: { "Content-Type": "application/json", Authorization: "Bearer secret-token" }, body: "{}" });
+      expect(withAuth.status).toBe(200);
+    } finally {
+      await server.stop();
+    }
+  });
+});
+
 describe("OperatorGrantInbox — shared-kernel grant round-trip", () => {
   it("agent write blocked → human approves → minted grant authorizes the same kernel", () => {
     // One kernel, shared between the gateway (agent face) and control plane (human face).

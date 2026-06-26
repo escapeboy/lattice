@@ -89,16 +89,19 @@ export class SessionRegistry {
   async destroy(id: string): Promise<SessionTrace | undefined> {
     const session = this.sessions.get(id);
     if (!session) return undefined;
-    for (const cleanup of session.subscriptions.values()) cleanup();
-    // Persist persona state before teardown so the next session resumes it.
-    if (session.topology === "persistent" && session.personaId) {
-      const snap = await this.scheduler.snapshotContext(session.context.id).catch(() => undefined);
-      if (snap) this.personaState.set(session.personaId, snap);
-    }
-    const trace = session.recorder.finish(); // finalize trace
     this.sessions.delete(id);
-    await this.scheduler.destroyContext(session.context.id);
-    return trace;
+    for (const cleanup of session.subscriptions.values()) cleanup();
+    try {
+      // Persist persona state before teardown so the next session resumes it.
+      if (session.topology === "persistent" && session.personaId) {
+        const snap = await this.scheduler.snapshotContext(session.context.id).catch(() => undefined);
+        if (snap) this.personaState.set(session.personaId, snap);
+      }
+      return session.recorder.finish(); // finalize trace
+    } finally {
+      // The context is ALWAYS released, even if snapshot/finish threw — no leak.
+      await this.scheduler.destroyContext(session.context.id).catch(() => undefined);
+    }
   }
 
   list(): string[] {

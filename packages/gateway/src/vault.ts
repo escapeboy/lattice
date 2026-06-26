@@ -8,8 +8,8 @@
  * encrypted store is persisted there, so personas/credentials survive restarts.
  */
 
-import { randomUUID, randomBytes, createCipheriv, createDecipheriv, createHash } from "node:crypto";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
+import { randomUUID, randomBytes, createCipheriv, createDecipheriv } from "node:crypto";
+import { readFileSync, writeFileSync, existsSync, chmodSync } from "node:fs";
 
 export interface VaultEntry {
   readonly id: string;
@@ -41,11 +41,16 @@ export class Vault {
   private readonly path: string | undefined;
 
   /**
-   * @param keyHex 64-char hex (32 bytes). Omitted → a random key is generated
-   *   (in-memory only; a process restart loses it — fine for dev/tests).
-   * @param path  optional JSON file the sealed store persists to.
+   * @param keyHex 64-char hex (exactly 32 bytes). Omitted → a random key is
+   *   generated (in-memory only; a restart loses it — fine for dev/tests, but
+   *   NOT valid with a persistence `path`). A non-hex/short value is rejected
+   *   rather than weakly derived — there is no passphrase KDF here.
+   * @param path  optional JSON file the sealed store persists to (mode 0600).
    */
   constructor(keyHex?: string, path?: string) {
+    if (path && !keyHex) {
+      throw new Error("A persistent vault requires LATTICE_VAULT_KEY (64-char hex); refusing to use an ephemeral key that would strand the stored credentials.");
+    }
     this.key = keyHex ? deriveKey(keyHex) : randomBytes(32);
     this.path = path;
     if (path && existsSync(path)) {
@@ -96,12 +101,18 @@ export class Vault {
 
   private persist(): void {
     if (!this.path) return;
-    writeFileSync(this.path, JSON.stringify(Array.from(this.entries.values())), "utf8");
+    // 0600: the sealed store is owner-only. writeFileSync's mode does not
+    // re-apply to an existing file, so chmod explicitly after the write.
+    writeFileSync(this.path, JSON.stringify(Array.from(this.entries.values())), { encoding: "utf8", mode: 0o600 });
+    chmodSync(this.path, 0o600);
   }
 }
 
-/** Accept a 64-char hex key directly; otherwise derive 32 bytes via SHA-256. */
+/** Require exactly 32 bytes of hex. No passphrase KDF — a weak passphrase run
+ *  through a single hash is brute-forceable, so reject it outright. */
 function deriveKey(keyHex: string): Buffer {
-  if (/^[0-9a-fA-F]{64}$/.test(keyHex)) return Buffer.from(keyHex, "hex");
-  return createHash("sha256").update(keyHex).digest();
+  if (!/^[0-9a-fA-F]{64}$/.test(keyHex)) {
+    throw new Error("LATTICE_VAULT_KEY must be exactly 64 hex characters (32 bytes). Generate one with: openssl rand -hex 32");
+  }
+  return Buffer.from(keyHex, "hex");
 }

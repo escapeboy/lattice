@@ -1,7 +1,7 @@
 /** Vault — AES-256-GCM at rest + disk persistence. */
 
 import { describe, it, expect, afterEach } from "vitest";
-import { rmSync, readFileSync, existsSync } from "node:fs";
+import { rmSync, readFileSync, existsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -53,6 +53,22 @@ describe("Vault — encryption at rest", () => {
     const v = new Vault();
     const { id } = v.store("X", "https://x.com", "u", "p");
     expect(v.getPassword(id)).toBe("p");
+  });
+
+  it("persists the sealed store with owner-only (0600) permissions", () => {
+    const path = tmp();
+    new Vault(KEY, path).store("X", "https://x.com", "u", "p");
+    const mode = statSync(path).mode & 0o777;
+    expect(mode).toBe(0o600);
+  });
+
+  it("refuses a persistent vault without a key (no silent ephemeral key)", () => {
+    expect(() => new Vault(undefined, tmp())).toThrow(/requires LATTICE_VAULT_KEY/);
+  });
+
+  it("rejects a non-hex / short key instead of weakly deriving it", () => {
+    expect(() => new Vault("hunter2")).toThrow(/64 hex/);
+    expect(() => new Vault("abc")).toThrow(/64 hex/);
   });
 
   it("each store uses a fresh IV (same password → different ciphertext)", () => {

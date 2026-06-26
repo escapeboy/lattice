@@ -8,7 +8,7 @@
 import type { SessionTrace, TraceEvent } from "@lattice/observability";
 
 function esc(s: string): string {
-  return s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+  return s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 }
 
 function rowFor(e: TraceEvent, t0: number): { lane: string; cls: string; text: string; rel: number } {

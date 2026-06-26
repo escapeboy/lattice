@@ -9,7 +9,7 @@ import type { HandoffView } from "./types.js";
 
 export function buildHandoffPage(h: HandoffView): string {
   const esc = (s: string): string =>
-    s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+    s.replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]!));
 
   const body =
     h.type === "approval"

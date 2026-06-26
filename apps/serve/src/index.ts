@@ -27,6 +27,8 @@ export interface LatticeServeConfig {
   vault?: Vault;
   /** Where finished traces are emitted (Svod note). File writer by default. */
   traceWriter?: SvodWriteFn;
+  /** Bearer token required on the control plane's state-changing routes. */
+  controlPlaneToken?: string;
 }
 
 /**
@@ -75,7 +77,7 @@ export function createLatticeCore(config: LatticeServeConfig): LatticeCore {
     submitHandoffInput: (handoffId, deviceId, sessionId, fieldNodeId, value) =>
       gateway.submitHandoffInput(handoffId, deviceId, sessionId, fieldNodeId, value),
     verifyDevice: (deviceId, challenge) => gateway.verifyDevice(deviceId, challenge),
-  });
+  }, config.controlPlaneToken);
   ref.control = control;
 
   return { gateway, control };
