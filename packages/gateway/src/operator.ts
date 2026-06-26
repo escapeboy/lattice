@@ -28,6 +28,8 @@ export interface DeviceRecord {
   /** ntfy topic or Web Push endpoint — the notification address, not a secret. */
   readonly target: string;
   readonly registeredAt: number;
+  /** OOB-verified: a device only receives handoffs once the challenge is confirmed. */
+  verified: boolean;
 }
 
 export interface BudgetState {
@@ -104,17 +106,43 @@ export class OperatorStore {
   }
 
   // ── devices ─────────────────────────────────────────────────────────────────
+  /** OOB challenges per pending device (never returned to the agent). */
+  private readonly challenges = new Map<string, string>();
+
   listDevices(): DeviceRecord[] {
     return Array.from(this.devices.values());
   }
 
-  registerDevice(label: string, channel: DeviceChannel, target: string): DeviceRecord {
-    const rec: DeviceRecord = { id: randomUUID(), label, channel, target, registeredAt: Date.now() };
+  /** Only verified devices receive handoff notifications. */
+  verifiedDevices(): DeviceRecord[] {
+    return Array.from(this.devices.values()).filter((d) => d.verified);
+  }
+
+  /**
+   * Register a device as PENDING and return its OOB challenge. The caller sends
+   * the challenge over the device's own channel (ntfy/push) — never back to the
+   * agent — and the human confirms it via verifyDevice().
+   */
+  registerDevice(label: string, channel: DeviceChannel, target: string): { device: DeviceRecord; challenge: string } {
+    const rec: DeviceRecord = { id: randomUUID(), label, channel, target, registeredAt: Date.now(), verified: false };
     this.devices.set(rec.id, rec);
-    return rec;
+    const challenge = randomUUID().slice(0, 6).toUpperCase();
+    this.challenges.set(rec.id, challenge);
+    return { device: rec, challenge };
+  }
+
+  /** Confirm a device with the OOB challenge it received on its channel. */
+  verifyDevice(id: string, challenge: string): boolean {
+    const expected = this.challenges.get(id);
+    const device = this.devices.get(id);
+    if (!expected || !device || expected !== challenge.toUpperCase()) return false;
+    device.verified = true;
+    this.challenges.delete(id);
+    return true;
   }
 
   revokeDevice(id: string): boolean {
+    this.challenges.delete(id);
     return this.devices.delete(id);
   }
 

@@ -74,6 +74,7 @@ export function createLatticeCore(config: LatticeServeConfig): LatticeCore {
     handoffs: gateway.handoffs,
     submitHandoffInput: (handoffId, deviceId, sessionId, fieldNodeId, value) =>
       gateway.submitHandoffInput(handoffId, deviceId, sessionId, fieldNodeId, value),
+    verifyDevice: (deviceId, challenge) => gateway.verifyDevice(deviceId, challenge),
   });
   ref.control = control;
 

@@ -391,6 +391,7 @@ export class GatewayServer {
   private readonly kernel: SecurityKernel;
   private readonly operatorStore: OperatorStore;
   private readonly handoff: HandoffManager;
+  private readonly notificationTransport: NotificationTransport;
   private readonly capabilities = new CapabilityRegistry();
   private readonly observer: GatewayObserver;
   /** Per-session action counter, for the theater view. */
@@ -413,8 +414,9 @@ export class GatewayServer {
     this.sessions = new SessionRegistry(engine, kernel);
     this.vault = opts?.vault ?? new Vault();
     this.operatorStore = new OperatorStore();
+    this.notificationTransport = opts?.handoffTransport ?? new NullTransport();
     this.handoff = new HandoffManager(
-      opts?.handoffTransport ?? new NullTransport(),
+      this.notificationTransport,
       opts?.handoffSigningKey ?? randomUUID(),
     );
     this.observer = opts?.observer ?? {};
@@ -463,6 +465,11 @@ export class GatewayServer {
   /** Control-plane seam: the live handoff manager (claim/resolve/input + audit). */
   get handoffs(): HandoffManager {
     return this.handoff;
+  }
+
+  /** Control-plane seam: confirm a pending device with its OOB challenge code. */
+  verifyDevice(deviceId: string, challenge: string): boolean {
+    return this.operatorStore.verifyDevice(deviceId, challenge);
   }
 
   /**
@@ -804,7 +811,7 @@ export class GatewayServer {
             ...(typeof a["field"] === "string" ? { field: a["field"] } : {}),
             ...(typeof a["ttlMs"] === "number" ? { ttlMs: a["ttlMs"] } : {}),
           },
-          this.operatorStore.listDevices(),
+          this.operatorStore.verifiedDevices(),
         );
         return ok({
           handoffId: req.id,
@@ -914,12 +921,19 @@ export class GatewayServer {
         return ok({ status: "applied", deleted });
       }
       case "device_register": {
-        const rec = this.operatorStore.registerDevice(
-          a["label"] as string,
-          a["channel"] as DeviceChannel,
-          a["target"] as string,
-        );
-        return ok({ status: "applied", device: rec });
+        const channel = a["channel"] as DeviceChannel;
+        const target = a["target"] as string;
+        const { device, challenge } = this.operatorStore.registerDevice(a["label"] as string, channel, target);
+        // Send the OOB challenge to the device over ITS channel — never to the
+        // agent. The human reads it and confirms via the control plane.
+        void this.notificationTransport.notify(device, {
+          handoffId: device.id,
+          type: "approval",
+          origin: "control-plane",
+          reason: `Verify this device with code ${challenge}`,
+          signature: "",
+        }).catch(() => { /* best effort */ });
+        return ok({ status: "pending_verification", deviceId: device.id, note: "a verification code was sent to the device's channel — confirm it in the control plane" });
       }
       case "device_revoke": {
         const revoked = this.operatorStore.revokeDevice(a["deviceId"] as string);

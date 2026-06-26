@@ -248,6 +248,16 @@ export class ControlPlaneServer {
       return;
     }
 
+    // ── Device OOB verification ────────────────────────────────────────────────
+    const deviceVerify = path.match(/^\/devices\/([^/]+)\/verify$/);
+    if (this.backend && method === "POST" && deviceVerify) {
+      const body = await readBody(req);
+      const { challenge } = (body ? JSON.parse(body) : {}) as { challenge?: string };
+      const verified = this.backend.verifyDevice(deviceVerify[1]!, challenge ?? "");
+      json(res, { verified });
+      return;
+    }
+
     // ── Human handoff (claim / approve / mediated input) ───────────────────────
     if (this.backend && method === "GET" && path === "/handoffs") {
       json(res, { handoffs: this.backend.handoffs.pending() });

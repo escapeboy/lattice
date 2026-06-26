@@ -72,4 +72,6 @@ export interface ControlPlaneBackend {
     fieldNodeId: string,
     value: string,
   ): Promise<boolean>;
+  /** Confirm a pending device with the OOB challenge it received. */
+  verifyDevice(deviceId: string, challenge: string): boolean;
 }

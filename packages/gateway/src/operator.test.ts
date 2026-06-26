@@ -109,6 +109,27 @@ describe("operator surface — write tier (human grant)", () => {
 
 // ── The four mandatory negative security tests ───────────────────────────────
 
+describe("operator surface — device OOB verification", () => {
+  it("a registered device is pending until verified; only verified devices receive handoffs", async () => {
+    const { client, gateway } = await build();
+    const grant = gateway.mintOperatorGrant({ tool: "device_register", sessionId: "operator" });
+    const reg = toolJson(await client.callTool({ name: "device_register", arguments: { grant, label: "Phone", channel: "ntfy", target: "topic" } }));
+    expect(reg["status"]).toBe("pending_verification");
+    const deviceId = reg["deviceId"] as string;
+
+    // device_list shows it unverified; the challenge was never returned to the agent.
+    const list = toolJson(await client.callTool({ name: "device_list", arguments: {} }));
+    const dev = (list["devices"] as Array<{ id: string; verified: boolean }>).find((d) => d.id === deviceId);
+    expect(dev?.verified).toBe(false);
+    expect(JSON.stringify(reg)).not.toMatch(/[A-Z0-9]{6}/); // no code leaked to the agent
+
+    // A wrong code fails; the right one (from the OOB channel) verifies.
+    expect(gateway.verifyDevice(deviceId, "WRONG1")).toBe(false);
+    await client.close();
+    await gateway.stop();
+  });
+});
+
 describe("operator surface — NEGATIVE: self-weakening below the floor", () => {
   it("agent policy_set dropping a floor primitive is refused + audited (even with a grant)", async () => {
     const { client, gateway, kernel } = await build();
