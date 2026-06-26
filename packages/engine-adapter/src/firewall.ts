@@ -78,9 +78,21 @@ export const FORBIDDEN_URL_SCHEMES: ReadonlySet<string> = new Set([
  * source. (Confirmed against the WHATWG parser; superset covers lenient fixup.)
  */
 export function forbiddenUrlScheme(raw: string): string | null {
+  // Canonicalize to a STRICT SUPERSET of any URL resolver before reading the
+  // scheme: (1) percent-decode, so `fi%6ce:` / `file%3a` / `%66ile:` resolve;
+  // (2) NFKC-normalize, folding fullwidth / confusable scheme letters; (3) strip
+  // every code point <= 0x20 (literal or decoded control/space). A real scheme is
+  // ASCII letters/digits/+-. only, so any obfuscation collapses to the real one.
+  let decoded = raw;
+  try {
+    decoded = decodeURIComponent(raw);
+  } catch {
+    /* malformed %-sequence — fall back to the raw string */
+  }
+  decoded = decoded.normalize("NFKC");
   let s = "";
-  for (let i = 0; i < raw.length; i++) {
-    if (raw.charCodeAt(i) > 0x20) s += raw[i];
+  for (let i = 0; i < decoded.length; i++) {
+    if (decoded.charCodeAt(i) > 0x20) s += decoded[i];
   }
   const colon = s.indexOf(":");
   if (colon < 0) return null;

@@ -149,8 +149,10 @@ export class ControlPlaneServer {
     const path = url.pathname;
     const method = req.method?.toUpperCase() ?? "GET";
 
-    res.setHeader("Access-Control-Allow-Origin", "*");
-    res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
+    // No wildcard CORS: the UI is served same-origin, so it needs no CORS grant.
+    // A `*` here let a malicious cross-origin page POST to the credentialed routes
+    // (e.g. mint+read an operator grant token). Same-origin requests are
+    // unaffected; cross-origin reads are now blocked by the browser.
     if (method === "OPTIONS") { res.writeHead(204).end(); return; }
 
     // State-changing routes require a bearer token when one is configured. The

@@ -100,9 +100,12 @@ describe("GatewayServer — MCP tool listing", () => {
   it("vault.store → vault.list via MCP — no password in response", async () => {
     const { client, gateway } = await buildInProcessClient();
 
+    // vault_store is now grant-gated (credential write). Mint a human grant.
+    const grant = gateway.mintOperatorGrant({ tool: "vault_store", sessionId: "operator" });
     const storeRes = await client.callTool({
       name: "vault_store",
       arguments: {
+        grant,
         label: "My Bank",
         origin: "https://bank.com",
         username: "alice@bank.com",
@@ -145,12 +148,20 @@ const LOGIN_HTML = `<!DOCTYPE html>
   <button type="submit" id="login-btn">Login</button>
 </form>
 <div id="result"></div>
+<div id="ls"></div>
 <script>
   document.getElementById("login-form").addEventListener("submit", (e) => {
     e.preventDefault();
     const u = document.getElementById("username").value;
     document.getElementById("result").textContent = "logged-in:" + u;
   });
+  // Page-owned localStorage probe (NOT agent eval): ?set=X persists X; the
+  // current value is reflected into #ls so a test can read it via a text: selector.
+  (function () {
+    const p = new URLSearchParams(location.search);
+    if (p.has("set")) localStorage.setItem("persona_test", p.get("set"));
+    document.getElementById("ls").textContent = localStorage.getItem("persona_test") || "";
+  })();
 </script>
 </body>
 </html>`;
@@ -320,10 +331,11 @@ describeIfBrowser("GatewayServer — browser integration", () => {
     expect(usernameNode).toBeDefined();
     expect(passwordNode).toBeDefined();
 
-    // Store credential
+    // Store credential (grant-gated write)
+    const vaultGrant = gateway.mintOperatorGrant({ tool: "vault_store", sessionId: "operator" });
     const storeText = toolText(await client.callTool({
       name: "vault_store",
-      arguments: { label: "Test Login", origin: serverUrl, username: "bob", password: "hunter2" },
+      arguments: { grant: vaultGrant, label: "Test Login", origin: serverUrl, username: "bob", password: "hunter2" },
     }));
     const { credentialId } = JSON.parse(storeText) as { credentialId: string };
     // Password must not appear in vault.store response
@@ -383,20 +395,22 @@ describeIfBrowser("GatewayServer — browser integration", () => {
   });
 
   it("persistent persona retains storage across sessions", async () => {
-    // First session as persona "p1": write to localStorage on the fixture origin.
+    // First session as persona "p1": the PAGE writes localStorage (via ?set=),
+    // not the agent — extract no longer evaluates arbitrary JS.
     const { sessionId: s1 } = JSON.parse(toolText(await client.callTool({
       name: "session_create", arguments: { topology: "persistent", personaId: "p1" },
     }))) as { sessionId: string };
-    await client.callTool({ name: "act_execute", arguments: { sessionId: s1, command: { type: "navigate", url: serverUrl } } });
-    await client.callTool({ name: "extract_query", arguments: { sessionId: s1, query: "localStorage.setItem('persona_test','remembered') || 'set'" } });
+    await client.callTool({ name: "act_execute", arguments: { sessionId: s1, command: { type: "navigate", url: `${serverUrl}?set=remembered` } } });
     await client.callTool({ name: "session_destroy", arguments: { sessionId: s1 } });
 
-    // Second session as the SAME persona: state was snapshotted + restored.
+    // Second session as the SAME persona: state was snapshotted + restored. Read
+    // the reflected value through a safe text: selector.
     const { sessionId: s2 } = JSON.parse(toolText(await client.callTool({
       name: "session_create", arguments: { topology: "persistent", personaId: "p1" },
     }))) as { sessionId: string };
+    await client.callTool({ name: "act_execute", arguments: { sessionId: s2, command: { type: "navigate", url: serverUrl } } });
     const { result } = JSON.parse(toolText(await client.callTool({
-      name: "extract_query", arguments: { sessionId: s2, query: "localStorage.getItem('persona_test')" },
+      name: "extract_query", arguments: { sessionId: s2, query: "text:#ls" },
     }))) as { result: string };
     expect(result).toBe("remembered");
     await client.callTool({ name: "session_destroy", arguments: { sessionId: s2 } });
@@ -407,10 +421,30 @@ describeIfBrowser("GatewayServer — browser integration", () => {
     }))) as { sessionId: string };
     await client.callTool({ name: "act_execute", arguments: { sessionId: s3, command: { type: "navigate", url: serverUrl } } });
     const { result: r2 } = JSON.parse(toolText(await client.callTool({
-      name: "extract_query", arguments: { sessionId: s3, query: "localStorage.getItem('persona_test')" },
+      name: "extract_query", arguments: { sessionId: s3, query: "text:#ls" },
     }))) as { result: string | null };
-    expect(r2).toBeNull();
+    expect(r2 === null || r2 === "").toBe(true);
     await client.callTool({ name: "session_destroy", arguments: { sessionId: s3 } });
+  });
+
+  it("a value read via perceive_snapshot cannot be laundered into an operator write (taint)", async () => {
+    const { sessionId } = JSON.parse(toolText(await client.callTool({ name: "session_create", arguments: {} }))) as { sessionId: string };
+    await client.callTool({ name: "act_execute", arguments: { sessionId, command: { type: "navigate", url: serverUrl } } });
+    // Perceiving the page taints its content (the form has a "Username" label).
+    const snap = JSON.parse(toolText(await client.callTool({ name: "perceive_snapshot", arguments: { sessionId, tier: "L1" } }))) as { nodes: Array<{ label: string }> };
+    const pageLabel = snap.nodes.find((n) => n.label)?.label as string;
+    expect(pageLabel).toBeTruthy();
+
+    // Forward that page-origin value into an operator write — must be refused as
+    // tainted_origin, even WITH a valid grant (the page value never authorizes a write).
+    const grant = gateway.mintOperatorGrant({ tool: "policy_set", sessionId: "operator" });
+    const res = JSON.parse(toolText(await client.callTool({
+      name: "policy_set",
+      arguments: { grant, allowedOrigins: [pageLabel] },
+    }))) as Record<string, unknown>;
+    expect(res["status"]).toBe("blocked");
+    expect(res["reason"]).toBe("tainted_origin");
+    await client.callTool({ name: "session_destroy", arguments: { sessionId } });
   });
 
   it("session.list shows active sessions", async () => {
