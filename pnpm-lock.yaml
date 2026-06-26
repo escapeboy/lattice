@@ -271,9 +271,6 @@ importers:
 
   packages/kernel:
     dependencies:
-      '@lattice/action':
-        specifier: workspace:*
-        version: link:../action
       '@lattice/engine':
         specifier: workspace:*
         version: link:../engine

@@ -8,7 +8,6 @@
   "include": ["src"],
   "references": [
     { "path": "../engine" },
-    { "path": "../perception" },
-    { "path": "../action" }
+    { "path": "../perception" }
   ]
 }
