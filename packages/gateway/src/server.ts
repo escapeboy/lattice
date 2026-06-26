@@ -350,6 +350,12 @@ function readBody(req: IncomingMessage): Promise<string | null> {
   });
 }
 
+/** True if a JSON-RPC body is an `initialize` request (may open a session). */
+function isInitialize(body: unknown): boolean {
+  if (Array.isArray(body)) return body.some(isInitialize);
+  return typeof body === "object" && body !== null && (body as { method?: unknown }).method === "initialize";
+}
+
 // ── GatewayServer ────────────────────────────────────────────────────────────
 
 export class GatewayServer {
@@ -360,7 +366,8 @@ export class GatewayServer {
   private readonly operatorStore: OperatorStore;
   private readonly handoff: HandoffManager;
   private httpServer: HttpServer | null = null;
-  private httpTransport: StreamableHTTPServerTransport | null = null;
+  /** Live MCP transports keyed by mcp-session-id (one per connected agent). */
+  private readonly mcpTransports = new Map<string, StreamableHTTPServerTransport>();
 
   constructor(
     engine: EngineAdapter,
@@ -375,11 +382,18 @@ export class GatewayServer {
       opts?.handoffTransport ?? new NullTransport(),
       opts?.handoffSigningKey ?? randomUUID(),
     );
-    this.mcp = new Server(
+    this.mcp = this.buildServer();
+  }
+
+  /** A fresh MCP Server wired to the shared gateway state (handlers dispatch
+   *  into this.* — so every per-session server shares one core). */
+  private buildServer(): Server {
+    const server = new Server(
       { name: "lattice-gateway", version: "0.1.0" },
       { capabilities: { tools: {} } },
     );
-    this.registerHandlers();
+    this.registerHandlers(server);
+    return server;
   }
 
   /**
@@ -415,10 +429,10 @@ export class GatewayServer {
     );
   }
 
-  private registerHandlers(): void {
-    this.mcp.setRequestHandler(ListToolsRequestSchema, () => Promise.resolve({ tools: TOOLS }));
+  private registerHandlers(server: Server): void {
+    server.setRequestHandler(ListToolsRequestSchema, () => Promise.resolve({ tools: TOOLS }));
 
-    this.mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
+    server.setRequestHandler(CallToolRequestSchema, async (req) => {
       const { name, arguments: args } = req.params;
       const a: Record<string, unknown> = args ?? {};
 
@@ -834,26 +848,15 @@ export class GatewayServer {
 
   /**
    * Start a network-listening MCP server over Streamable HTTP (the self-hosted
-   * Docker entrypoint). Stateless JSON mode: MCP transport carries no session;
-   * browser sessions are application-level (session.create returns a sessionId
-   * the client threads through perceive/act). Endpoint: POST/GET/DELETE /mcp.
+   * Docker entrypoint). MULTI-SESSION: each `initialize` mints a new transport +
+   * Server pair keyed by mcp-session-id, so many agents connect concurrently.
+   * Subsequent requests route by the mcp-session-id header. Browser sessions
+   * remain application-level (session.create → sessionId in tool args).
+   * Endpoint: POST/GET/DELETE /mcp.
    */
   async startHttp(port = 8765, host = "0.0.0.0"): Promise<{ url: string }> {
-    // Stateful single-session transport: the SDK assigns an mcp-session-id on
-    // initialize and the client threads it through subsequent requests. Browser
-    // sessions remain application-level (session.create → sessionId in tool args).
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => randomUUID(),
-      enableJsonResponse: true,
-    });
-    // SDK's StreamableHTTPServerTransport declares onclose getter as `() => void
-    // | undefined`, which is structurally incompatible with Transport under
-    // exactOptionalPropertyTypes — a benign variance quirk; cast at the boundary.
-    await this.mcp.connect(transport as unknown as Parameters<Server["connect"]>[0]);
-    this.httpTransport = transport;
-
     const server = createServer((req, res) => {
-      this.handleHttp(req, res, transport).catch((e: unknown) => {
+      this.handleHttp(req, res).catch((e: unknown) => {
         if (!res.headersSent) res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
       });
@@ -870,16 +873,12 @@ export class GatewayServer {
     });
   }
 
-  private async handleHttp(
-    req: IncomingMessage,
-    res: ServerResponse,
-    transport: StreamableHTTPServerTransport,
-  ): Promise<void> {
+  private async handleHttp(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const path = (req.url ?? "/").split("?")[0];
 
     if (path === "/health") {
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ status: "ok", server: "lattice-gateway", version: "0.1.0" }));
+      res.end(JSON.stringify({ status: "ok", server: "lattice-gateway", version: "0.1.0", sessions: this.mcpTransports.size }));
       return;
     }
 
@@ -889,15 +888,43 @@ export class GatewayServer {
       return;
     }
 
+    const sessionId = req.headers["mcp-session-id"];
+    const sid = Array.isArray(sessionId) ? sessionId[0] : sessionId;
+
     if (req.method === "POST") {
       const raw = await readBody(req);
       const body: unknown = raw ? JSON.parse(raw) : undefined;
-      await transport.handleRequest(req, res, body);
+
+      // Existing session → route to its transport.
+      if (sid && this.mcpTransports.has(sid)) {
+        await this.mcpTransports.get(sid)!.handleRequest(req, res, body);
+        return;
+      }
+      // New session: only an `initialize` may open one.
+      if (!sid && isInitialize(body)) {
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => randomUUID(),
+          enableJsonResponse: true,
+          onsessioninitialized: (newId: string) => { this.mcpTransports.set(newId, transport); },
+        });
+        transport.onclose = () => { if (transport.sessionId) this.mcpTransports.delete(transport.sessionId); };
+        // One Server per transport, all dispatching into the shared gateway state.
+        await this.buildServer().connect(transport as unknown as Parameters<Server["connect"]>[0]);
+        await transport.handleRequest(req, res, body);
+        return;
+      }
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32000, message: "Bad Request: no valid session — send initialize first" } }));
       return;
     }
 
-    // GET (SSE stream) and DELETE (session teardown) are handled by the transport.
-    await transport.handleRequest(req, res);
+    // GET (SSE) and DELETE (teardown) require a known session.
+    if (sid && this.mcpTransports.has(sid)) {
+      await this.mcpTransports.get(sid)!.handleRequest(req, res);
+      return;
+    }
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Unknown or missing mcp-session-id" }));
   }
 
   async stop(): Promise<void> {
@@ -906,10 +933,8 @@ export class GatewayServer {
       await new Promise<void>((resolve) => this.httpServer!.close(() => resolve()));
       this.httpServer = null;
     }
-    if (this.httpTransport) {
-      await this.httpTransport.close();
-      this.httpTransport = null;
-    }
+    for (const t of this.mcpTransports.values()) await t.close();
+    this.mcpTransports.clear();
     await this.mcp.close();
   }
 
