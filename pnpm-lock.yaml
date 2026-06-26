@@ -218,6 +218,9 @@ importers:
       '@lattice/perception':
         specifier: workspace:*
         version: link:../perception
+      '@lattice/recipe':
+        specifier: workspace:*
+        version: link:../recipe
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -319,6 +322,31 @@ importers:
         specifier: workspace:*
         version: link:../engine-adapter
     devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.20.0
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.6(@types/node@22.20.0)
+
+  packages/recipe:
+    dependencies:
+      '@lattice/action':
+        specifier: workspace:*
+        version: link:../action
+      '@lattice/perception':
+        specifier: workspace:*
+        version: link:../perception
+    devDependencies:
+      '@lattice/engine-adapter':
+        specifier: workspace:*
+        version: link:../engine-adapter
+      '@lattice/kernel':
+        specifier: workspace:*
+        version: link:../kernel
       '@types/node':
         specifier: 'catalog:'
         version: 22.20.0
