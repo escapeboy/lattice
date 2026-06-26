@@ -382,6 +382,37 @@ describeIfBrowser("GatewayServer — browser integration", () => {
     await client.callTool({ name: "session_destroy", arguments: { sessionId } });
   });
 
+  it("persistent persona retains storage across sessions", async () => {
+    // First session as persona "p1": write to localStorage on the fixture origin.
+    const { sessionId: s1 } = JSON.parse(toolText(await client.callTool({
+      name: "session_create", arguments: { topology: "persistent", personaId: "p1" },
+    }))) as { sessionId: string };
+    await client.callTool({ name: "act_execute", arguments: { sessionId: s1, command: { type: "navigate", url: serverUrl } } });
+    await client.callTool({ name: "extract_query", arguments: { sessionId: s1, query: "localStorage.setItem('persona_test','remembered') || 'set'" } });
+    await client.callTool({ name: "session_destroy", arguments: { sessionId: s1 } });
+
+    // Second session as the SAME persona: state was snapshotted + restored.
+    const { sessionId: s2 } = JSON.parse(toolText(await client.callTool({
+      name: "session_create", arguments: { topology: "persistent", personaId: "p1" },
+    }))) as { sessionId: string };
+    const { result } = JSON.parse(toolText(await client.callTool({
+      name: "extract_query", arguments: { sessionId: s2, query: "localStorage.getItem('persona_test')" },
+    }))) as { result: string };
+    expect(result).toBe("remembered");
+    await client.callTool({ name: "session_destroy", arguments: { sessionId: s2 } });
+
+    // A different persona does NOT see p1's state.
+    const { sessionId: s3 } = JSON.parse(toolText(await client.callTool({
+      name: "session_create", arguments: { topology: "persistent", personaId: "p2" },
+    }))) as { sessionId: string };
+    await client.callTool({ name: "act_execute", arguments: { sessionId: s3, command: { type: "navigate", url: serverUrl } } });
+    const { result: r2 } = JSON.parse(toolText(await client.callTool({
+      name: "extract_query", arguments: { sessionId: s3, query: "localStorage.getItem('persona_test')" },
+    }))) as { result: string | null };
+    expect(r2).toBeNull();
+    await client.callTool({ name: "session_destroy", arguments: { sessionId: s3 } });
+  });
+
   it("session.list shows active sessions", async () => {
     const { sessionId: s1id } = JSON.parse(toolText(await client.callTool({ name: "session_create", arguments: {} }))) as { sessionId: string };
     const { sessionId: s2id } = JSON.parse(toolText(await client.callTool({ name: "session_create", arguments: {} }))) as { sessionId: string };

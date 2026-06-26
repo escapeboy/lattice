@@ -54,11 +54,12 @@ export interface GatewayObserver {
 const TOOLS = [
   {
     name: "session_create",
-    description: "Create an isolated browser session context",
+    description: "Create an isolated browser session context. persistent + personaId resumes that persona's cookies/storage from the previous session.",
     inputSchema: {
       type: "object" as const,
       properties: {
         topology: { type: "string", enum: ["ephemeral", "persistent"], default: "ephemeral" },
+        personaId: { type: "string", description: "Persona to operate as (state persists across sessions when topology=persistent)" },
       },
     },
   },
@@ -539,10 +540,11 @@ export class GatewayServer {
       // ── session.* ──────────────────────────────────────────────────────────
       case "session_create": {
         const topology = (a["topology"] as "ephemeral" | "persistent" | undefined) ?? "ephemeral";
-        const session = await this.sessions.create(topology);
+        const personaId = a["personaId"] as string | undefined;
+        const session = await this.sessions.create(topology, personaId);
         this.actionCounts.set(session.id, 0);
         this.emitSession(session.id);
-        return ok({ sessionId: session.id, topology });
+        return ok({ sessionId: session.id, topology, ...(personaId ? { personaId } : {}) });
       }
 
       case "session_destroy": {
