@@ -176,6 +176,19 @@ describe("@lattice/kernel — origin scoping (navigation)", () => {
     const k = createSecurityKernel({ ...defaultConfig, allowedOrigins: ["https://app.example.com"] });
     expect(k.checkNavigation("not a url")).toBe(false);
   });
+
+  it("blocks file:// and other sandbox-escaping schemes UNCONDITIONALLY (floor, even unrestricted)", () => {
+    // Empty allowlist = unrestricted dev default, yet file:/javascript:/blob:
+    // must still be refused — this is the local-file-exfil floor.
+    const k = createSecurityKernel({ ...defaultConfig, allowedOrigins: [] });
+    expect(k.checkNavigation("file:///etc/passwd")).toBe(false);
+    expect(k.checkNavigation("javascript:fetch('/x')")).toBe(false);
+    expect(k.checkNavigation("blob:https://x/abc")).toBe(false);
+    expect(k.checkNavigation("view-source:file:///etc/passwd")).toBe(false);
+    // Legitimate web + schemeless contexts still pass under the unrestricted default.
+    expect(k.checkNavigation("https://anywhere.example/x")).toBe(true);
+    expect(k.checkNavigation("data:text/html,<h1>x</h1>")).toBe(true);
+  });
 });
 
 describe("@lattice/kernel — audit log", () => {

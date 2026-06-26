@@ -46,6 +46,15 @@ export const FIREWALLED_FLAGS: ReadonlySet<string> = new Set([
 export const FIREWALLED_GET_TARGETS: ReadonlySet<string> = new Set(["cdp-url"]);
 
 /**
+ * URL schemes that read local files or escape the page sandbox. Blocking
+ * `--allow-file-access` is NOT enough: a top-level `open file:///etc/passwd`
+ * needs no flag, and the page text is then readable via `read`/snapshot. These
+ * schemes are refused on ANY argument, regardless of subcommand or task policy
+ * (constitutional floor — local file read is never an agent primitive).
+ */
+const FIREWALLED_URL_SCHEME = /^\s*(file|javascript|blob|filesystem|view-source|chrome|chrome-extension):/i;
+
+/**
  * Throw EngineFirewallError if `subcommand`/`args` would invoke a firewalled
  * primitive. Called by the process runner on every command, so no code path —
  * intended or accidental — can route one to the engine.
@@ -62,5 +71,9 @@ export function assertNotFirewalled(subcommand: string, args: readonly string[])
     // Match both `--flag` and `--flag=value` forms.
     const flag = a.includes("=") ? a.slice(0, a.indexOf("=")) : a;
     if (FIREWALLED_FLAGS.has(flag)) throw new EngineFirewallError(flag);
+    // A local-file / sandbox-escaping URL on any positional arg (e.g. the URL
+    // passed to `open`/`read`) — the actual file-read primitive, flagless.
+    const scheme = FIREWALLED_URL_SCHEME.exec(a);
+    if (scheme) throw new EngineFirewallError(`${scheme[1]}: url`);
   }
 }

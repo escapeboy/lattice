@@ -83,6 +83,17 @@ See `packages/engine-adapter/src/firewall.test.ts`,
 `packages/gateway/src/{operator,build-on-gateway}.test.ts`,
 `packages/action/src/governed-actuator.test.ts`.
 
+## Deployment hardening
+
+- **Local-file / sandbox-escaping schemes** (`file:`, `javascript:`, `blob:`,
+  `filesystem:`, `view-source:`, `chrome:`) are refused unconditionally at both
+  the kernel (`checkNavigation`) and the engine firewall — local file read is
+  never an agent primitive, regardless of task policy.
+- **Set `LATTICE_ALLOWED_ORIGINS`** in any HTTP-exposed deployment. An empty
+  allowlist means "unrestricted navigation" (a dev convenience); in production,
+  scope each task to its origins so cross-origin wander is blocked too. (The
+  scheme floor above holds either way.)
+
 ## Reporting
 
 This is a research prototype. Report security issues privately to the

@@ -49,6 +49,17 @@ describe("engine firewall — kernel-bypass primitives refused (ADR 0002 §3)", 
     expect(() => assertNotFirewalled("open", ["http://x", "--state", "/tmp/auth.json"])).toThrow();
   });
 
+  it("refuses a file:// (or javascript:/blob:) URL on its own — the flagless file-read primitive", () => {
+    // This is the real local-file-exfil vector: open file:// then read it back.
+    // Must be refused WITHOUT any --allow-file-access flag present.
+    expect(() => assertNotFirewalled("open", ["file:///etc/passwd"])).toThrow(/file: url/i);
+    expect(() => assertNotFirewalled("open", ["  file:///etc/shadow"])).toThrow(EngineFirewallError);
+    expect(() => assertNotFirewalled("open", ["javascript:fetch('/x')"])).toThrow(EngineFirewallError);
+    expect(() => assertNotFirewalled("open", ["blob:https://x/abc"])).toThrow(EngineFirewallError);
+    expect(() => assertNotFirewalled("read", ["file:///etc/passwd"])).toThrow(EngineFirewallError);
+    expect(() => assertNotFirewalled("open", ["view-source:file:///etc/passwd"])).toThrow(EngineFirewallError);
+  });
+
   it("allows the safe semantic surface", () => {
     expect(() => assertNotFirewalled("open", ["https://example.com"])).not.toThrow();
     expect(() => assertNotFirewalled("snapshot", ["-i"])).not.toThrow();

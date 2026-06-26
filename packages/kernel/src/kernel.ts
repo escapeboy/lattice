@@ -171,6 +171,20 @@ export class SecurityKernelImpl implements SecurityKernel {
   }
 
   checkNavigation(targetUrl: string): boolean {
+    // Constitutional floor: local-file / sandbox-escaping schemes are refused
+    // unconditionally — BEFORE the empty-allowlist short-circuit — so an
+    // `open file:///etc/passwd` is blocked even under the unrestricted dev
+    // default. This is not policy-editable.
+    if (/^\s*(file|javascript|blob|filesystem|view-source|chrome|chrome-extension):/i.test(targetUrl)) {
+      this.emit({
+        kind: "policy",
+        origin: "task",
+        sessionId: "navigation",
+        detail: `navigation blocked (forbidden scheme): ${targetUrl.slice(0, 80)}`,
+        granted: false,
+      });
+      return false;
+    }
     // Empty allowlist = unrestricted (dev default). Schemeless contexts
     // (data:, about:, blank) carry no origin and are always allowed.
     if (this.config.allowedOrigins.length === 0) return true;

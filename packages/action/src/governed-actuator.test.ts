@@ -106,6 +106,14 @@ describe("GovernedActuator — kernel gating over the semantic engine", () => {
     expect(session.navs).toHaveLength(0);
   });
 
+  it("file:// navigation is refused even under an unrestricted allowlist (file-exfil floor)", async () => {
+    const open = createSecurityKernel({ allowedOrigins: [], egressAllowlist: [], prohibitedActions: [] });
+    await expect(
+      actuator(open).execute({ type: "navigate", url: "file:///etc/passwd" }),
+    ).rejects.toMatchObject({ code: "navigation_interrupted" });
+    expect(session.navs).toHaveLength(0);
+  });
+
   it("in-scope navigation passes", async () => {
     const res = await actuator().execute({ type: "navigate", url: "https://app.example.com/next" });
     expect(res.ok).toBe(true);
