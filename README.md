@@ -8,12 +8,31 @@ concurrency runtime for many parallel browser contexts, a **security kernel**
 browser end-to-end.
 
 This repository is the **P0 + P1-prototype**: a CDP-based runtime in TypeScript
-that proves the interface, the token economics, and the security primitives. The
-native Chromium fork (P3, Rust/C++) is intentionally out of scope here — see
+that proves the interface, the perception economics, and the security primitives.
+The native Chromium fork (P3, Rust/C++) is intentionally out of scope here — see
 [ADR 0001](https://-/projects/lattice/docs/adr/0001-language-and-stack) in the
 project's Svod vault.
 
 > License: **Apache-2.0** (see [LICENSE](./LICENSE)).
+
+## What Lattice is an alternative to
+
+Lattice is an alternative to the **Chrome / screenshot method** of driving a
+browser with an agent: feed the model a screenshot (≈1–2K vision tokens/step) or
+a raw-DOM dump (≈10–50K text tokens/step), let it reason in pixels or markup, and
+replay synthetic clicks. That method is expensive, brittle, and ungoverned. The
+perception economics below are measured **against that method** — not against
+other semantic engines.
+
+It is **not** positioned as "cheaper than a terse semantic engine." A semantic
+engine such as [agent-browser](https://agent-browser.dev) already emits a compact
+accessibility snapshot, so on raw perception tokens for a single page the two are
+in the same order of magnitude (Lattice builds *on* agent-browser — see ADR 0002).
+Against a semantic engine the Lattice differentiator is **not** the token count —
+it is **governance** (tainting, capability gating, egress firewall, constitutional
+floor), **cross-mutation stable identity** (reliability across re-renders), and
+**streamed deltas** over multi-step flows. Those are what the eval harness and the
+governance eval measure; see [`packages/eval`](./packages/eval).
 
 ## Architecture
 
@@ -214,6 +233,12 @@ human-channel operations, not agent tools.
 - **L1** — the Interaction Graph: roles, labels, state, value, relations, stable IDs. The default; < 5KB for a typical page.
 - **L2 / L3** — L1 plus geometry (box model). Request only where pixel-level reasoning is needed.
 
+The L1 payload is **compact** — one `role + label` line per node, addressed by a
+stable `NodeId`. The agent acts on the id, never on a serialized node blob, so the
+perception cost is the labels, not the structure. Measured cost and the
+comparison against the screenshot / raw-DOM baselines (and agent-browser as a
+parity reference) live in [`packages/eval`](./packages/eval).
+
 ## Security model
 
 The kernel mediates every consequential effect. Its guarantees:
@@ -277,7 +302,9 @@ Lattice adds what agent-browser lacks — cross-mutation stable identity (their
 refs are per-snapshot), taint-per-node, streamed deltas, the Security Kernel,
 the operator surface, traces, control plane, and human handoff. The agent's only
 door is the MCP gateway; agent-browser's kernel-bypass primitives are firewalled.
-See [SECURITY.md](./SECURITY.md) and the `NOTICE` for attribution.
+See [SECURITY.md](./SECURITY.md) and the `NOTICE` for attribution. agent-browser
+is therefore a **parity reference** in the eval, not the opponent — the opponent
+is the screenshot / raw-DOM method (see "What Lattice is an alternative to").
 
 ## License & attribution
 

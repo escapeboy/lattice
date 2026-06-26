@@ -22,6 +22,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import type { EngineAdapter } from "@lattice/engine";
 import type { FidelityTier, InteractionGraph } from "@lattice/perception";
+import { compactNodes, compactDelta } from "@lattice/perception";
 import type { GrantScope, OperatorRequest, SecurityKernel } from "@lattice/kernel";
 import { SessionRegistry } from "./sessions.js";
 import type { SessionProvider } from "./sessions.js";
@@ -630,19 +631,20 @@ export class GatewayServer {
 
         session.recorder.recordSnapshot(ig.tier, ig.url, ig.title ?? "", nodes);
         this.emitSession(session.id, { nodeCount: nodes.length, lastSnapshotAt: Date.now() });
-        if (prev) {
-          const d = session.perception.delta(prev, ig);
-          session.recorder.recordDelta(d.added.length, d.removed.length, d.updated.length, ig.url);
-        }
+        const d = prev ? session.perception.delta(prev, ig) : null;
+        if (d) session.recorder.recordDelta(d.added.length, d.removed.length, d.updated.length, ig.url);
 
+        // Agent-facing wire shape is the COMPACT projection: the agent acts on
+        // the stable NodeId and reads role + label, not the full node scaffold.
+        // The trace recorder above keeps the full nodes for replay fidelity.
         const payload = {
           tier: tier === "L3" ? "L3" : ig.tier,
           url: ig.url,
           title: ig.title,
           nodeCount: nodes.length,
           serializedSize: ig.serializedSize,
-          nodes,
-          ...(prev ? { delta: session.perception.delta(prev, ig) } : {}),
+          nodes: compactNodes(nodes),
+          ...(d ? { delta: compactDelta(d) } : {}),
         };
 
         // L3 = pixel tier: ship the IG plus a screenshot so a vision-capable
@@ -668,7 +670,7 @@ export class GatewayServer {
         const delta = session.perception.delta(session.lastSnapshot, current);
         session.recorder.recordDelta(delta.added.length, delta.removed.length, delta.updated.length, current.url);
         session.lastSnapshot = current;
-        return ok({ delta, url: current.url });
+        return ok({ delta: compactDelta(delta), url: current.url });
       }
 
       case "perceive_subscribe": {
@@ -684,7 +686,7 @@ export class GatewayServer {
                 const d = session.perception.delta(session.lastSnapshot, current);
                 if (d.added.length + d.removed.length + d.updated.length > 0) {
                   session.recorder.recordDelta(d.added.length, d.removed.length, d.updated.length, current.url);
-                  notify?.({ subscriptionId: subId, sessionId: session.id, url: current.url, delta: d });
+                  notify?.({ subscriptionId: subId, sessionId: session.id, url: current.url, delta: compactDelta(d) });
                 }
               }
               session.lastSnapshot = current;
