@@ -74,7 +74,7 @@ describe("ControlPlaneServer — native-timeline + operator read surfaces (D5)",
     try {
       server.submitTrace({
         traceId: "tEV", sessionId: "s1", startTs: 0, endTs: 10,
-        events: [{ kind: "session_start", ts: 0, topology: "ephemeral" }],
+        events: [{ kind: "session_start", traceId: "tEV", sessionId: "s1", ts: 0, seq: 0, topology: "ephemeral" }],
       });
       expect((await fetch(`${url}/replay/tEV/events`)).status).toBe(401);
       const ok = await fetch(`${url}/replay/tEV/events`, { headers: { Authorization: "Bearer secret-token" } });
