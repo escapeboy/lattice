@@ -10,6 +10,45 @@ import { ApprovalInbox } from "./inbox.js";
 import { PolicyEditor } from "./policy.js";
 import { OperatorGrantInbox } from "./operator-grants.js";
 import type { PolicyConfig } from "./types.js";
+import type { SessionTrace } from "@lattice/observability";
+
+function traceWith(id: string): SessionTrace {
+  return { traceId: id, sessionId: `s-${id}`, startTs: 1, endTs: 2, events: [] };
+}
+
+// ── Trace retention + replay PII access (P1.1 follow-up) ─────────────────────
+
+describe("ControlPlaneServer — full-trace retention is ephemeral + bounded", () => {
+  it("ring-buffers full traces to the most recent 50 (no unbounded PII store)", async () => {
+    const server = new ControlPlaneServer();
+    const { url } = await server.start(0, "127.0.0.1");
+    try {
+      for (let i = 0; i < 60; i++) server.submitTrace(traceWith(`t${i}`));
+      const ids = (await (await fetch(`${url}/replay`)).json()) as { traces: string[] };
+      expect(ids.traces.length).toBe(50);
+      expect(ids.traces).not.toContain("t0"); // oldest evicted
+      expect(ids.traces).toContain("t59"); // newest kept
+    } finally {
+      await server.stop();
+    }
+  });
+});
+
+describe("ControlPlaneServer — replay reads serve full PII, so they require the token", () => {
+  it("GET /replay and /replay/:id need the bearer token when one is configured", async () => {
+    const server = new ControlPlaneServer(undefined, undefined, "secret-token");
+    const { url } = await server.start(0, "127.0.0.1");
+    try {
+      server.submitTrace(traceWith("tX"));
+      expect((await fetch(`${url}/replay`)).status).toBe(401);
+      expect((await fetch(`${url}/replay/tX`)).status).toBe(401);
+      const ok = await fetch(`${url}/replay/tX`, { headers: { Authorization: "Bearer secret-token" } });
+      expect(ok.status).toBe(200);
+    } finally {
+      await server.stop();
+    }
+  });
+});
 
 // ── OperatorGrantInbox — UI and MCP share one grant slice (S8) ───────────────
 

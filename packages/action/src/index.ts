@@ -15,7 +15,7 @@ export type {
 export { ActionError } from "./types.js";
 export { ActionExecutor } from "./executor.js";
 export { GovernedActuator } from "./governed-actuator.js";
-export type { ReAnchor, GovernedActionResult, ActuatorContext } from "./governed-actuator.js";
+export type { ReAnchor, GovernedActionResult, ActuatorContext, RateLimiterPort } from "./governed-actuator.js";
 
 import type { CDPHandle, ContextHandle } from "@lattice/engine";
 import type { PerceptionEngine } from "@lattice/perception";

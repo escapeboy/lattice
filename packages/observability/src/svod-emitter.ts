@@ -7,12 +7,20 @@
 
 import type { SessionTrace, SvodWriteFn } from "./types.js";
 import { extractMetrics, formatMetrics } from "./metrics.js";
+import { redactTrace, DEFAULT_PII_POLICY, type PiiPolicy } from "./redact.js";
 
+/**
+ * Write a session trace to Svod. PII is redacted BEFORE persistence by default
+ * (P1.1) — pass a policy to log specific origins in full. The Svod store is
+ * immutable, so raw PII must never reach it; redaction here is the boundary.
+ */
 export async function emitToSvod(
   trace: SessionTrace,
   write: SvodWriteFn,
   pathPrefix = "projects/lattice/traces",
+  policy: PiiPolicy = DEFAULT_PII_POLICY,
 ): Promise<string> {
+  trace = redactTrace(trace, policy);
   const metrics = extractMetrics(trace);
   const date = new Date(trace.startTs).toISOString().slice(0, 19).replace("T", " ");
 

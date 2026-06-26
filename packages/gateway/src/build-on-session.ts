@@ -18,11 +18,13 @@ import type { EngineSession } from "@lattice/engine-adapter";
 import { snapshotToIG, igDelta } from "@lattice/perception";
 import type { SnapshotIG, IGDelta } from "@lattice/perception";
 import { GovernedActuator } from "@lattice/action";
-import type { ActionCommand, GovernedActionResult, ReAnchor } from "@lattice/action";
+import type { ActionCommand, GovernedActionResult, ReAnchor, RateLimiterPort } from "@lattice/action";
 
 export interface BuildOnSessionContext {
   readonly origin: string;
   readonly sessionId: string;
+  /** Optional shared per-origin rate limiter (P1.2). */
+  readonly rateLimiter?: RateLimiterPort;
 }
 
 export class BuildOnSession {

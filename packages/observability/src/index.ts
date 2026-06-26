@@ -26,4 +26,6 @@ export { SessionReplayer } from "./replayer.js";
 export { extractMetrics, formatMetrics } from "./metrics.js";
 export type { TraceMetrics } from "./metrics.js";
 export { emitToSvod } from "./svod-emitter.js";
+export { redactTrace, redactString, detectPii, DEFAULT_PII_POLICY } from "./redact.js";
+export type { PiiPolicy, PiiMode, PiiType } from "./redact.js";
 export { renderTrace, renderReplayDiff } from "./viewer.js";
