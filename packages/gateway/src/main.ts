@@ -25,6 +25,12 @@ function list(env: string | undefined): string[] {
 }
 
 async function main(): Promise<void> {
+  // Legacy CDP-only entrypoint. The production default is apps/serve (build-on,
+  // firewalled). This stack lacks the build-on firewall — dev/debug only.
+  console.error(
+    "WARNING: packages/gateway/main.js is the legacy raw-CDP entrypoint (no build-on " +
+      "firewall). For production use apps/serve/main.js (build-on default).",
+  );
   const transportKind = process.env["LATTICE_TRANSPORT"] ?? "http";
   const port = Number(process.env["LATTICE_PORT"] ?? "8765");
   const host = process.env["LATTICE_HOST"] ?? "0.0.0.0";

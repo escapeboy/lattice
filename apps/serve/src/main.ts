@@ -15,11 +15,12 @@
 
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { randomUUID } from "node:crypto";
 import { createEngineAdapter, detectChromiumExecutable } from "@lattice/engine";
 import { AgentBrowserEngine } from "@lattice/engine-adapter";
 import { SecurityKernelImpl } from "@lattice/kernel";
 import { NtfyTransport, Vault } from "@lattice/gateway";
-import { createLatticeCore } from "./index.js";
+import { createLatticeCore, resolveEngineKind } from "./index.js";
 
 function list(env: string | undefined): string[] {
   return (env ?? "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -30,9 +31,18 @@ async function main(): Promise<void> {
   const gwHost = process.env["LATTICE_HOST"] ?? "0.0.0.0";
   const cpPort = Number(process.env["CONTROL_PLANE_PORT"] ?? "7900");
 
-  // Engine selection (ADR 0002): LATTICE_ENGINE=agent-browser runs the build-on
-  // stack (agent-browser behind the governed session); default is the CDP stack.
-  const engineKind = process.env["LATTICE_ENGINE"] === "agent-browser" ? "agent-browser" : "cdp";
+  // Engine selection (ADR 0002): the DEFAULT is the build-on stack (agent-browser
+  // behind the governed session), where eval/raw-CDP/file are structurally absent.
+  // The raw CDP stack is opt-in ONLY via LATTICE_ENGINE=cdp — it lacks the
+  // build-on firewall (a raw cdp() handle exists) and is for local dev/debug, not
+  // production. Any value other than "cdp" selects build-on.
+  const engineKind = resolveEngineKind(process.env["LATTICE_ENGINE"]);
+  if (engineKind === "cdp") {
+    console.error(
+      "WARNING: LATTICE_ENGINE=cdp selects the legacy raw-CDP stack, which lacks the " +
+        "build-on firewall. Do NOT use it for production / untrusted pages.",
+    );
+  }
 
   let cdpEngine: ReturnType<typeof createEngineAdapter> | undefined;
   let buildOnEngine: AgentBrowserEngine | undefined;
@@ -72,7 +82,14 @@ async function main(): Promise<void> {
     await writeFile(abs, content, "utf8");
   };
 
-  const cpToken = process.env["LATTICE_CP_TOKEN"];
+  // Secure by default (A2/A5): the /mcp endpoint and the control-plane API are
+  // ALWAYS token-gated. If a token env is unset we generate an ephemeral one and
+  // print it — access is never open, but startup is not blocked. Real deployments
+  // set LATTICE_MCP_TOKEN / LATTICE_CP_TOKEN.
+  const cpToken = process.env["LATTICE_CP_TOKEN"] ?? randomUUID();
+  if (!process.env["LATTICE_CP_TOKEN"]) console.error(`LATTICE_CP_TOKEN unset — generated for this run: ${cpToken}`);
+  const mcpToken = process.env["LATTICE_MCP_TOKEN"] ?? randomUUID();
+  if (!process.env["LATTICE_MCP_TOKEN"]) console.error(`LATTICE_MCP_TOKEN unset — generated for this run: ${mcpToken}`);
   // PII redaction policy (P1.1): traces are redacted before Svod by default.
   // LATTICE_PII_FULL_ORIGINS lists origins to log in full (trusted internal).
   const piiFullOrigins = list(process.env["LATTICE_PII_FULL_ORIGINS"]);
@@ -91,7 +108,8 @@ async function main(): Promise<void> {
     ...(piiPolicy ? { piiPolicy } : {}),
     ...(ntfyBase ? { handoffTransport: new NtfyTransport(ntfyBase) } : {}),
     ...(handoffKey ? { handoffSigningKey: handoffKey } : {}),
-    ...(cpToken ? { controlPlaneToken: cpToken } : {}),
+    controlPlaneToken: cpToken,
+    mcpToken,
   });
 
   const shutdown = () => {

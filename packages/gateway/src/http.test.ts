@@ -85,6 +85,27 @@ describe("Gateway — Streamable HTTP transport (S10)", () => {
     expect(res.status).toBe(404);
   });
 
+  it("A2: when an mcpToken is set, /mcp requires the bearer token (PII surface not open)", async () => {
+    const engine = createEngineAdapter();
+    const kernel = createSecurityKernel({ allowedOrigins: [], egressAllowlist: [], prohibitedActions: [] });
+    const guarded = createAgentGateway({ engine, kernel, mcpToken: "s3cr3t" });
+    const { url } = await guarded.startHttp(0, "127.0.0.1");
+    try {
+      const init = { jsonrpc: "2.0", id: 1, method: "initialize", params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "x", version: "0" } } };
+      // No token → 401.
+      const noAuth = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream" }, body: JSON.stringify(init) });
+      expect(noAuth.status).toBe(401);
+      // Wrong token → 401.
+      const badAuth = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", Accept: "application/json, text/event-stream", Authorization: "Bearer nope" }, body: JSON.stringify(init) });
+      expect(badAuth.status).toBe(401);
+      // /health stays open (no token needed).
+      const health = await fetch(url.replace("/mcp", "/health"));
+      expect(health.status).toBe(200);
+    } finally {
+      await guarded.stop();
+    }
+  });
+
   it("supports multiple concurrent MCP sessions (transport pool)", async () => {
     // Two independent agents connect at the same time — the old single-session
     // transport would reject the second initialize with a 400.

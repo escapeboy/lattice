@@ -21,8 +21,19 @@ export interface LatticeCore {
   control: ControlPlaneServer;
 }
 
+/**
+ * Resolve the engine kind from the LATTICE_ENGINE value. The DEFAULT is the
+ * build-on (firewalled) stack — eval/raw-CDP/file are structurally absent there.
+ * Only the explicit value "cdp" selects the legacy raw-CDP stack, which lacks
+ * the build-on firewall and is dev-only. (A1: no default path bypasses the
+ * kernel/tainting/floor guarantees.)
+ */
+export function resolveEngineKind(engineEnv: string | undefined): "cdp" | "agent-browser" {
+  return engineEnv === "cdp" ? "cdp" : "agent-browser";
+}
+
 export interface LatticeServeConfig {
-  /** Which engine backs the gateway sessions. Default "cdp" (the existing stack). */
+  /** Which engine backs the gateway sessions. Default "agent-browser" (build-on, firewalled). */
   engineKind?: "cdp" | "agent-browser";
   /** Launched CDP engine (required for engineKind "cdp"). */
   engine?: EngineAdapter;
@@ -38,6 +49,8 @@ export interface LatticeServeConfig {
   piiPolicy?: PiiPolicy;
   /** Bearer token required on the control plane's state-changing routes. */
   controlPlaneToken?: string;
+  /** Bearer token required on the /mcp endpoint when set (A2). */
+  mcpToken?: string;
 }
 
 /**
@@ -81,6 +94,7 @@ export function createLatticeCore(config: LatticeServeConfig): LatticeCore {
     ...(config.handoffTransport ? { handoffTransport: config.handoffTransport } : {}),
     ...(config.handoffSigningKey ? { handoffSigningKey: config.handoffSigningKey } : {}),
     ...(config.vault ? { vault: config.vault } : {}),
+    ...(config.mcpToken ? { mcpToken: config.mcpToken } : {}),
   };
 
   // Dual-stack engine selection (ADR 0002): the build-on path runs agent-browser

@@ -50,4 +50,8 @@ USER node
 
 EXPOSE 8765
 ENTRYPOINT ["dumb-init", "--"]
-CMD ["node", "packages/gateway/dist/main.js"]
+# Canonical entrypoint: the unified serve process, which DEFAULTS to the build-on
+# (firewalled) engine — eval/raw-CDP/file are structurally absent. The legacy
+# CDP-only entrypoint (packages/gateway/dist/main.js) is dev-only and bypasses
+# the build-on firewall; do not use it as the production default.
+CMD ["node", "apps/serve/dist/main.js"]
