@@ -1,0 +1,16 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "composite": true
+  },
+  "include": ["src"],
+  "references": [
+    { "path": "../../packages/engine" },
+    { "path": "../../packages/gateway" },
+    { "path": "../../packages/kernel" },
+    { "path": "../../packages/observability" },
+    { "path": "../control-plane" }
+  ]
+}

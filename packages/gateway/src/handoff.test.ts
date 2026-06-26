@@ -14,7 +14,7 @@ import { createAgentGateway } from "./index.js";
 import type { GatewayServer } from "./server.js";
 
 function device(id: string, target: string): DeviceRecord {
-  return { id, label: id, channel: "ntfy", target, registeredAt: 0 };
+  return { id, label: id, channel: "ntfy", target, registeredAt: 0, verified: true };
 }
 
 class CollectingTransport implements NotificationTransport {
@@ -135,9 +135,15 @@ describeIfBrowser("session_handoff — agent raises, human resolves (E2E)", () =
   it("registers a device, raises an approval handoff (fan-out), human two-taps approve", async () => {
     const { client, gateway, transport, engine } = await build();
 
-    // Human registers a phone (control plane grant).
+    // Human registers a phone (control plane grant) — pending until OOB-verified.
     const grant = gateway.mintOperatorGrant({ tool: "device_register", sessionId: "operator" });
-    jsonOf(await client.callTool({ name: "device_register", arguments: { grant, label: "Phone", channel: "ntfy", target: "lattice-handoff" } }));
+    const reg = jsonOf(await client.callTool({ name: "device_register", arguments: { grant, label: "Phone", channel: "ntfy", target: "lattice-handoff" } }));
+    expect(reg["status"]).toBe("pending_verification");
+    // The OOB challenge was sent over the device channel (captured by the transport).
+    const challengeCall = transport.calls.find((c) => c.payload.reason.includes("Verify this device"));
+    const code = challengeCall!.payload.reason.match(/code ([A-Z0-9]+)/)![1]!;
+    transport.calls.length = 0; // reset so we count only the handoff fan-out
+    expect(gateway.verifyDevice(reg["deviceId"] as string, code)).toBe(true);
 
     // A browser session exists (data: URL — no external network).
     const { sessionId } = jsonOf(await client.callTool({ name: "session_create", arguments: {} })) as { sessionId: string };

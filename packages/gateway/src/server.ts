@@ -27,17 +27,39 @@ import { SessionRegistry } from "./sessions.js";
 import { Vault } from "./vault.js";
 import { OperatorStore, type DeviceChannel, type PolicySnapshot } from "./operator.js";
 import { HandoffManager, NullTransport, type HandoffType, type NotificationTransport } from "./handoff.js";
+import { CapabilityRegistry } from "./capability.js";
+import type { SessionTrace } from "@lattice/observability";
+
+/** A live view of a session, emitted to the control-plane theater. */
+export interface SessionViewEvent {
+  readonly sessionId: string;
+  readonly url: string;
+  readonly actionCount: number;
+  readonly lastSnapshotAt?: number;
+  readonly nodeCount?: number;
+}
+
+/** Hooks the unified `serve` process wires to the control plane. */
+export interface GatewayObserver {
+  /** Session created/updated (theater). `null` view = session removed. */
+  onSession?: (sessionId: string, view: SessionViewEvent | null) => void;
+  /** A completed trace (replay browser + Svod emit). */
+  onTrace?: (trace: SessionTrace) => void;
+  /** An operator write was blocked needing a human grant (approval inbox). */
+  onGrantRequest?: (scope: GrantScope, summary: string) => void;
+}
 
 // ── Tool definitions ─────────────────────────────────────────────────────────
 
 const TOOLS = [
   {
     name: "session_create",
-    description: "Create an isolated browser session context",
+    description: "Create an isolated browser session context. persistent + personaId resumes that persona's cookies/storage from the previous session.",
     inputSchema: {
       type: "object" as const,
       properties: {
         topology: { type: "string", enum: ["ephemeral", "persistent"], default: "ephemeral" },
+        personaId: { type: "string", description: "Persona to operate as (state persists across sessions when topology=persistent)" },
       },
     },
   },
@@ -77,6 +99,27 @@ const TOOLS = [
     },
   },
   {
+    name: "perceive_subscribe",
+    description: "Subscribe to live IG deltas: the gateway pushes a 'notifications/perceive' message whenever the page changes (no polling by the agent). Returns a subscriptionId.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        sessionId: { type: "string" },
+        intervalMs: { type: "number", default: 1000 },
+      },
+      required: ["sessionId"],
+    },
+  },
+  {
+    name: "perceive_unsubscribe",
+    description: "Stop a perceive_subscribe stream",
+    inputSchema: {
+      type: "object" as const,
+      properties: { sessionId: { type: "string" }, subscriptionId: { type: "string" } },
+      required: ["sessionId", "subscriptionId"],
+    },
+  },
+  {
     name: "act_execute",
     description: "Execute a semantic action on the page (navigate/act/fill/select/submit/scroll_to/wait_for)",
     inputSchema: {
@@ -113,12 +156,17 @@ const TOOLS = [
   },
   {
     name: "capability_check",
-    description: "Check whether the current page exposes native MCP/WebMCP capabilities",
+    description: "Check whether the current page exposes native MCP/WebMCP capabilities. Caches per origin; returns fastPath=true + declared actions when the site speaks WebMCP.",
     inputSchema: {
       type: "object" as const,
       properties: { sessionId: { type: "string" } },
       required: ["sessionId"],
     },
+  },
+  {
+    name: "capability_list",
+    description: "List the cached per-origin capability map (which sites expose WebMCP fast paths)",
+    inputSchema: { type: "object" as const, properties: {} },
   },
   {
     name: "vault_store",
@@ -350,6 +398,12 @@ function readBody(req: IncomingMessage): Promise<string | null> {
   });
 }
 
+/** True if a JSON-RPC body is an `initialize` request (may open a session). */
+function isInitialize(body: unknown): boolean {
+  if (Array.isArray(body)) return body.some(isInitialize);
+  return typeof body === "object" && body !== null && (body as { method?: unknown }).method === "initialize";
+}
+
 // ── GatewayServer ────────────────────────────────────────────────────────────
 
 export class GatewayServer {
@@ -359,27 +413,67 @@ export class GatewayServer {
   private readonly kernel: SecurityKernel;
   private readonly operatorStore: OperatorStore;
   private readonly handoff: HandoffManager;
+  private readonly notificationTransport: NotificationTransport;
+  private readonly capabilities = new CapabilityRegistry();
+  private readonly observer: GatewayObserver;
+  /** Per-session action counter, for the theater view. */
+  private readonly actionCounts = new Map<string, number>();
   private httpServer: HttpServer | null = null;
-  private httpTransport: StreamableHTTPServerTransport | null = null;
+  /** Live MCP transports keyed by mcp-session-id (one per connected agent). */
+  private readonly mcpTransports = new Map<string, StreamableHTTPServerTransport>();
+  /** Upper bound on concurrent MCP sessions (anti-DoS for the open endpoint). */
+  private readonly maxMcpSessions = 256;
 
   constructor(
     engine: EngineAdapter,
     kernel: SecurityKernel,
-    opts?: { handoffTransport?: NotificationTransport; handoffSigningKey?: string },
+    opts?: {
+      handoffTransport?: NotificationTransport;
+      handoffSigningKey?: string;
+      vault?: Vault;
+      observer?: GatewayObserver;
+    },
   ) {
     this.kernel = kernel;
     this.sessions = new SessionRegistry(engine, kernel);
-    this.vault = new Vault();
+    this.vault = opts?.vault ?? new Vault();
     this.operatorStore = new OperatorStore();
+    this.notificationTransport = opts?.handoffTransport ?? new NullTransport();
     this.handoff = new HandoffManager(
-      opts?.handoffTransport ?? new NullTransport(),
+      this.notificationTransport,
       opts?.handoffSigningKey ?? randomUUID(),
     );
-    this.mcp = new Server(
+    this.observer = opts?.observer ?? {};
+    this.mcp = this.buildServer();
+  }
+
+  /** Emit a theater view for a session (current url + action count). */
+  private emitSession(sessionId: string, extra?: { nodeCount?: number; lastSnapshotAt?: number }): void {
+    if (!this.observer.onSession) return;
+    const session = this.sessions.get(sessionId);
+    if (!session) { this.observer.onSession(sessionId, null); return; }
+    this.observer.onSession(sessionId, {
+      sessionId,
+      url: session.context.currentUrl(),
+      actionCount: this.actionCounts.get(sessionId) ?? 0,
+      ...(extra?.nodeCount !== undefined ? { nodeCount: extra.nodeCount } : {}),
+      ...(extra?.lastSnapshotAt !== undefined ? { lastSnapshotAt: extra.lastSnapshotAt } : {}),
+    });
+  }
+
+  private bumpAction(sessionId: string): void {
+    this.actionCounts.set(sessionId, (this.actionCounts.get(sessionId) ?? 0) + 1);
+  }
+
+  /** A fresh MCP Server wired to the shared gateway state (handlers dispatch
+   *  into this.* — so every per-session server shares one core). */
+  private buildServer(): Server {
+    const server = new Server(
       { name: "lattice-gateway", version: "0.1.0" },
       { capabilities: { tools: {} } },
     );
-    this.registerHandlers();
+    this.registerHandlers(server);
+    return server;
   }
 
   /**
@@ -395,6 +489,11 @@ export class GatewayServer {
   /** Control-plane seam: the live handoff manager (claim/resolve/input + audit). */
   get handoffs(): HandoffManager {
     return this.handoff;
+  }
+
+  /** Control-plane seam: confirm a pending device with its OOB challenge code. */
+  verifyDevice(deviceId: string, challenge: string): boolean {
+    return this.operatorStore.verifyDevice(deviceId, challenge);
   }
 
   /**
@@ -415,15 +514,19 @@ export class GatewayServer {
     );
   }
 
-  private registerHandlers(): void {
-    this.mcp.setRequestHandler(ListToolsRequestSchema, () => Promise.resolve({ tools: TOOLS }));
+  private registerHandlers(server: Server): void {
+    server.setRequestHandler(ListToolsRequestSchema, () => Promise.resolve({ tools: TOOLS }));
 
-    this.mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
+    server.setRequestHandler(CallToolRequestSchema, async (req) => {
       const { name, arguments: args } = req.params;
       const a: Record<string, unknown> = args ?? {};
+      // Bind a server→client push for this connection (perceive_subscribe).
+      const notify = (params: Record<string, unknown>): void => {
+        void server.notification({ method: "notifications/perceive", params }).catch(() => { /* client gone */ });
+      };
 
       try {
-        return await this.dispatch(name, a);
+        return await this.dispatch(name, a, notify);
       } catch (e) {
         return err(e instanceof Error ? e.message : String(e));
       }
@@ -433,17 +536,25 @@ export class GatewayServer {
   private async dispatch(
     name: string,
     a: Record<string, unknown>,
+    notify?: (params: Record<string, unknown>) => void,
   ): Promise<ToolResult> {
     switch (name) {
       // ── session.* ──────────────────────────────────────────────────────────
       case "session_create": {
         const topology = (a["topology"] as "ephemeral" | "persistent" | undefined) ?? "ephemeral";
-        const session = await this.sessions.create(topology);
-        return ok({ sessionId: session.id, topology });
+        const personaId = a["personaId"] as string | undefined;
+        const session = await this.sessions.create(topology, personaId);
+        this.actionCounts.set(session.id, 0);
+        this.emitSession(session.id);
+        return ok({ sessionId: session.id, topology, ...(personaId ? { personaId } : {}) });
       }
 
       case "session_destroy": {
-        await this.sessions.destroy(a["sessionId"] as string);
+        const sessionId = a["sessionId"] as string;
+        const trace = await this.sessions.destroy(sessionId);
+        this.actionCounts.delete(sessionId);
+        if (this.observer.onSession) this.observer.onSession(sessionId, null);
+        if (trace && this.observer.onTrace) this.observer.onTrace(trace);
         return ok({ destroyed: true });
       }
 
@@ -468,6 +579,7 @@ export class GatewayServer {
         session.lastSnapshot = ig;
 
         session.recorder.recordSnapshot(ig.tier, ig.url, ig.title ?? "", nodes);
+        this.emitSession(session.id, { nodeCount: nodes.length, lastSnapshotAt: Date.now() });
         if (prev) {
           const d = session.perception.delta(prev, ig);
           session.recorder.recordDelta(d.added.length, d.removed.length, d.updated.length, ig.url);
@@ -509,14 +621,63 @@ export class GatewayServer {
         return ok({ delta, url: current.url });
       }
 
+      case "perceive_subscribe": {
+        const session = this.getSession(a["sessionId"] as string);
+        const intervalMs = Math.max(250, (a["intervalMs"] as number | undefined) ?? 1000);
+        const subId = randomUUID();
+        // Poll on a timer; push a notification whenever the IG actually changes.
+        const timer = setInterval(() => {
+          void (async () => {
+            try {
+              const current = (await session.perception.snapshot("L1")) as InteractionGraph;
+              if (session.lastSnapshot) {
+                const d = session.perception.delta(session.lastSnapshot, current);
+                if (d.added.length + d.removed.length + d.updated.length > 0) {
+                  session.recorder.recordDelta(d.added.length, d.removed.length, d.updated.length, current.url);
+                  notify?.({ subscriptionId: subId, sessionId: session.id, url: current.url, delta: d });
+                }
+              }
+              session.lastSnapshot = current;
+            } catch { /* page navigated/closed — next tick or unsubscribe */ }
+          })();
+        }, intervalMs);
+        if (typeof timer.unref === "function") timer.unref();
+        session.subscriptions.set(subId, () => clearInterval(timer));
+        return ok({ subscribed: true, subscriptionId: subId, intervalMs, channel: "notifications/perceive" });
+      }
+
+      case "perceive_unsubscribe": {
+        const session = this.getSession(a["sessionId"] as string);
+        const subId = a["subscriptionId"] as string;
+        const cleanup = session.subscriptions.get(subId);
+        if (cleanup) { cleanup(); session.subscriptions.delete(subId); }
+        return ok({ unsubscribed: cleanup !== undefined });
+      }
+
       // ── act.* ──────────────────────────────────────────────────────────────
       case "act_execute": {
         const session = this.getSession(a["sessionId"] as string);
         const command = a["command"] as Parameters<typeof session.action.execute>[0];
+        // Origin scoping: a navigation outside the task's allowed origins is
+        // blocked before it executes (no wandering without escalation).
+        if (command.type === "navigate" && typeof command.url === "string" && !this.kernel.checkNavigation(command.url)) {
+          return err(`origin_out_of_scope: navigation to ${command.url} is outside the task's allowed origins`);
+        }
         session.recorder.recordAction(command);
+        this.bumpAction(session.id);
         try {
           const result = await session.action.execute(command);
+          // Origin scoping also covers navigation TRIGGERED by an action — a
+          // click on a link or a form submit can change the document origin,
+          // which the pre-check on `navigate` can't see. If the action landed
+          // out of scope, surface it (the persona's cookies must not wander).
+          const landedUrl = result.url ?? session.context.currentUrl();
+          if (!this.kernel.checkNavigation(landedUrl)) {
+            session.recorder.recordActionResult(false, landedUrl, undefined, "origin_out_of_scope");
+            return err(`origin_out_of_scope: the action navigated to ${landedUrl}, outside the task's allowed origins`);
+          }
           session.recorder.recordActionResult(result.success, result.url, result.extracted);
+          this.emitSession(session.id);
           return ok({
             success: result.success,
             url: result.url,
@@ -543,14 +704,37 @@ export class GatewayServer {
       // ── capability.* ───────────────────────────────────────────────────────
       case "capability_check": {
         const session = this.getSession(a["sessionId"] as string);
+        const url = session.context.currentUrl();
+        // Serve a fresh cached probe without re-touching the page.
+        const cached = this.capabilities.get(url);
+        if (cached) {
+          return ok({ nativeMCP: cached.nativeMCP, url, actions: cached.actions, fastPath: cached.nativeMCP, cached: true });
+        }
         const res = await session.context.cdp().send<{ result: { value: boolean } }>(
           "Runtime.evaluate",
           { expression: "typeof navigator.modelContext !== 'undefined'", returnByValue: true },
         ).catch(() => ({ result: { value: false } }));
+        const actions = res.result.value
+          ? await session.context.cdp().send<{ result: { value: string[] } }>(
+              "Runtime.evaluate",
+              { expression: "Object.keys((navigator.modelContext && navigator.modelContext.tools) || {})", returnByValue: true },
+            ).then((r) => r.result.value).catch(() => [])
+          : [];
+        const cap = this.capabilities.record(url, res.result.value, actions);
         return ok({
-          nativeMCP: res.result.value,
-          url: session.context.currentUrl(),
+          nativeMCP: cap.nativeMCP,
+          url,
+          actions: cap.actions,
+          // When the site speaks WebMCP, the agent can take the fast path
+          // (declared tool calls) instead of DOM scraping. Declarations are
+          // untrusted — still gated by the kernel like any action.
+          fastPath: cap.nativeMCP,
+          cached: false,
         });
+      }
+
+      case "capability_list": {
+        return ok({ origins: this.capabilities.list() });
       }
 
       // ── vault.* ────────────────────────────────────────────────────────────
@@ -698,7 +882,7 @@ export class GatewayServer {
             ...(typeof a["field"] === "string" ? { field: a["field"] } : {}),
             ...(typeof a["ttlMs"] === "number" ? { ttlMs: a["ttlMs"] } : {}),
           },
-          this.operatorStore.listDevices(),
+          this.operatorStore.verifiedDevices(),
         );
         return ok({
           handoffId: req.id,
@@ -771,6 +955,11 @@ export class GatewayServer {
       if (decision.floorViolation) {
         return ok({ status: "blocked", reason: "floor_violation", detail: decision.reason });
       }
+      // Raise the request to the human channel (approval inbox in the theater).
+      if (this.observer.onGrantRequest) {
+        const sessionId = (a["sessionId"] as string | undefined) ?? "operator";
+        this.observer.onGrantRequest({ tool: name, sessionId }, `operator write: ${name}`);
+      }
       return ok({ status: "awaiting_human_grant", requiresHuman: true, detail: decision.reason });
     }
 
@@ -803,12 +992,19 @@ export class GatewayServer {
         return ok({ status: "applied", deleted });
       }
       case "device_register": {
-        const rec = this.operatorStore.registerDevice(
-          a["label"] as string,
-          a["channel"] as DeviceChannel,
-          a["target"] as string,
-        );
-        return ok({ status: "applied", device: rec });
+        const channel = a["channel"] as DeviceChannel;
+        const target = a["target"] as string;
+        const { device, challenge } = this.operatorStore.registerDevice(a["label"] as string, channel, target);
+        // Send the OOB challenge to the device over ITS channel — never to the
+        // agent. The human reads it and confirms via the control plane.
+        void this.notificationTransport.notify(device, {
+          handoffId: device.id,
+          type: "approval",
+          origin: "control-plane",
+          reason: `Verify this device with code ${challenge}`,
+          signature: "",
+        }).catch(() => { /* best effort */ });
+        return ok({ status: "pending_verification", deviceId: device.id, note: "a verification code was sent to the device's channel — confirm it in the control plane" });
       }
       case "device_revoke": {
         const revoked = this.operatorStore.revokeDevice(a["deviceId"] as string);
@@ -829,26 +1025,15 @@ export class GatewayServer {
 
   /**
    * Start a network-listening MCP server over Streamable HTTP (the self-hosted
-   * Docker entrypoint). Stateless JSON mode: MCP transport carries no session;
-   * browser sessions are application-level (session.create returns a sessionId
-   * the client threads through perceive/act). Endpoint: POST/GET/DELETE /mcp.
+   * Docker entrypoint). MULTI-SESSION: each `initialize` mints a new transport +
+   * Server pair keyed by mcp-session-id, so many agents connect concurrently.
+   * Subsequent requests route by the mcp-session-id header. Browser sessions
+   * remain application-level (session.create → sessionId in tool args).
+   * Endpoint: POST/GET/DELETE /mcp.
    */
   async startHttp(port = 8765, host = "0.0.0.0"): Promise<{ url: string }> {
-    // Stateful single-session transport: the SDK assigns an mcp-session-id on
-    // initialize and the client threads it through subsequent requests. Browser
-    // sessions remain application-level (session.create → sessionId in tool args).
-    const transport = new StreamableHTTPServerTransport({
-      sessionIdGenerator: () => randomUUID(),
-      enableJsonResponse: true,
-    });
-    // SDK's StreamableHTTPServerTransport declares onclose getter as `() => void
-    // | undefined`, which is structurally incompatible with Transport under
-    // exactOptionalPropertyTypes — a benign variance quirk; cast at the boundary.
-    await this.mcp.connect(transport as unknown as Parameters<Server["connect"]>[0]);
-    this.httpTransport = transport;
-
     const server = createServer((req, res) => {
-      this.handleHttp(req, res, transport).catch((e: unknown) => {
+      this.handleHttp(req, res).catch((e: unknown) => {
         if (!res.headersSent) res.writeHead(500, { "Content-Type": "application/json" });
         res.end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
       });
@@ -865,16 +1050,12 @@ export class GatewayServer {
     });
   }
 
-  private async handleHttp(
-    req: IncomingMessage,
-    res: ServerResponse,
-    transport: StreamableHTTPServerTransport,
-  ): Promise<void> {
+  private async handleHttp(req: IncomingMessage, res: ServerResponse): Promise<void> {
     const path = (req.url ?? "/").split("?")[0];
 
     if (path === "/health") {
       res.writeHead(200, { "Content-Type": "application/json" });
-      res.end(JSON.stringify({ status: "ok", server: "lattice-gateway", version: "0.1.0" }));
+      res.end(JSON.stringify({ status: "ok", server: "lattice-gateway", version: "0.1.0", sessions: this.mcpTransports.size }));
       return;
     }
 
@@ -884,15 +1065,50 @@ export class GatewayServer {
       return;
     }
 
+    const sessionId = req.headers["mcp-session-id"];
+    const sid = Array.isArray(sessionId) ? sessionId[0] : sessionId;
+
     if (req.method === "POST") {
       const raw = await readBody(req);
       const body: unknown = raw ? JSON.parse(raw) : undefined;
-      await transport.handleRequest(req, res, body);
+
+      // Existing session → route to its transport.
+      if (sid && this.mcpTransports.has(sid)) {
+        await this.mcpTransports.get(sid)!.handleRequest(req, res, body);
+        return;
+      }
+      // New session: only an `initialize` may open one.
+      if (!sid && isInitialize(body)) {
+        // Bound the pool so an unauthenticated client can't allocate transports
+        // without limit (memory DoS). Front this with auth in production.
+        if (this.mcpTransports.size >= this.maxMcpSessions) {
+          res.writeHead(503, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32000, message: "Too many sessions; retry later" } }));
+          return;
+        }
+        const transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => randomUUID(),
+          enableJsonResponse: true,
+          onsessioninitialized: (newId: string) => { this.mcpTransports.set(newId, transport); },
+        });
+        transport.onclose = () => { if (transport.sessionId) this.mcpTransports.delete(transport.sessionId); };
+        // One Server per transport, all dispatching into the shared gateway state.
+        await this.buildServer().connect(transport as unknown as Parameters<Server["connect"]>[0]);
+        await transport.handleRequest(req, res, body);
+        return;
+      }
+      res.writeHead(400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32000, message: "Bad Request: no valid session — send initialize first" } }));
       return;
     }
 
-    // GET (SSE stream) and DELETE (session teardown) are handled by the transport.
-    await transport.handleRequest(req, res);
+    // GET (SSE) and DELETE (teardown) require a known session.
+    if (sid && this.mcpTransports.has(sid)) {
+      await this.mcpTransports.get(sid)!.handleRequest(req, res);
+      return;
+    }
+    res.writeHead(404, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ error: "Unknown or missing mcp-session-id" }));
   }
 
   async stop(): Promise<void> {
@@ -901,10 +1117,8 @@ export class GatewayServer {
       await new Promise<void>((resolve) => this.httpServer!.close(() => resolve()));
       this.httpServer = null;
     }
-    if (this.httpTransport) {
-      await this.httpTransport.close();
-      this.httpTransport = null;
-    }
+    for (const t of this.mcpTransports.values()) await t.close();
+    this.mcpTransports.clear();
     await this.mcp.close();
   }
 

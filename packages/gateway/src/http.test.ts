@@ -84,6 +84,29 @@ describe("Gateway — Streamable HTTP transport (S10)", () => {
     const res = await fetch(mcpUrl.replace("/mcp", "/nope"));
     expect(res.status).toBe(404);
   });
+
+  it("supports multiple concurrent MCP sessions (transport pool)", async () => {
+    // Two independent agents connect at the same time — the old single-session
+    // transport would reject the second initialize with a 400.
+    const a = await connectClient(mcpUrl);
+    const b = await connectClient(mcpUrl);
+    try {
+      const [ta, tb] = await Promise.all([a.listTools(), b.listTools()]);
+      expect(ta.tools.length).toBeGreaterThan(0);
+      expect(tb.tools.length).toBe(ta.tools.length);
+
+      // /health reports two live sessions.
+      const health = await (await fetch(mcpUrl.replace("/mcp", "/health"))).json() as { sessions: number };
+      expect(health.sessions).toBeGreaterThanOrEqual(2);
+
+      // Closing one leaves the other usable.
+      await a.close();
+      const stillWorks = await b.listTools();
+      expect(stillWorks.tools.length).toBe(tb.tools.length);
+    } finally {
+      await b.close();
+    }
+  });
 });
 
 // ── End-to-end over HTTP (browser-gated) ──────────────────────────────────────
@@ -126,7 +149,7 @@ describeIfBrowser("Gateway — external agent end-to-end over HTTP (S10)", () =>
     engine = createEngineAdapter();
     await engine.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
     const kernel = createSecurityKernel({
-      allowedOrigins: ["http://127.0.0.1"],
+      allowedOrigins: [] /* unrestricted: dynamic ports */,
       egressAllowlist: [],
       prohibitedActions: [],
     });

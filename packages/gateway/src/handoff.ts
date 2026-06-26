@@ -106,9 +106,11 @@ export class HandoffManager {
     private readonly expiryPolicy: ExpiryPolicy = "pause_and_audit",
   ) {}
 
-  private sign(parts: { id: string; type: HandoffType; sessionId: string; field: string; createdAt: number }): string {
+  private sign(parts: { id: string; type: HandoffType; sessionId: string; origin: string; reason: string; field: string; createdAt: number }): string {
+    // reason+origin are INSIDE the signature: the human approves based on them,
+    // so they must be authenticated, not just the request identity.
     return createHmac("sha256", this.signingKey)
-      .update(`${parts.id}|${parts.type}|${parts.sessionId}|${parts.field}|${parts.createdAt}`)
+      .update(`${parts.id}|${parts.type}|${parts.sessionId}|${parts.origin}|${parts.reason}|${parts.field}|${parts.createdAt}`)
       .digest("hex");
   }
 
@@ -118,6 +120,8 @@ export class HandoffManager {
       id: req.id,
       type: req.type,
       sessionId: req.sessionId,
+      origin: req.origin,
+      reason: req.reason,
       field: req.field ?? "",
       createdAt: req.createdAt,
     });
@@ -138,6 +142,8 @@ export class HandoffManager {
       id,
       type: opts.type,
       sessionId: opts.sessionId,
+      origin: opts.origin,
+      reason: opts.reason,
       field: opts.field ?? "",
       createdAt,
     });

@@ -170,6 +170,31 @@ export class SecurityKernelImpl implements SecurityKernel {
     return decision;
   }
 
+  checkNavigation(targetUrl: string): boolean {
+    // Empty allowlist = unrestricted (dev default). Schemeless contexts
+    // (data:, about:, blank) carry no origin and are always allowed.
+    if (this.config.allowedOrigins.length === 0) return true;
+    let allowed: boolean;
+    try {
+      const u = new URL(targetUrl);
+      if (u.protocol === "data:" || u.protocol === "about:") {
+        allowed = true;
+      } else {
+        allowed = this.config.allowedOrigins.includes(u.origin);
+      }
+    } catch {
+      allowed = false;
+    }
+    this.emit({
+      kind: "policy",
+      origin: "task",
+      sessionId: "navigation",
+      detail: `navigation ${allowed ? "in-scope" : "blocked (out-of-scope)"}: ${targetUrl.slice(0, 80)}`,
+      granted: allowed,
+    });
+    return allowed;
+  }
+
   checkEgress(req: EgressRequest): boolean {
     let allowed: boolean;
     try {

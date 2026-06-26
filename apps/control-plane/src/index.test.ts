@@ -13,6 +13,25 @@ import type { PolicyConfig } from "./types.js";
 
 // ── OperatorGrantInbox — UI and MCP share one grant slice (S8) ───────────────
 
+describe("ControlPlaneServer — auth on state-changing routes", () => {
+  it("mutating routes require the bearer token; reads stay open", async () => {
+    const server = new ControlPlaneServer(undefined, undefined, "secret-token");
+    const { url } = await server.start(0, "127.0.0.1");
+    try {
+      // GET is open.
+      expect((await fetch(`${url}/policy`)).status).toBe(200);
+      // PUT without token → 401.
+      const noAuth = await fetch(`${url}/policy`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: "{}" });
+      expect(noAuth.status).toBe(401);
+      // PUT with token → ok.
+      const withAuth = await fetch(`${url}/policy`, { method: "PUT", headers: { "Content-Type": "application/json", Authorization: "Bearer secret-token" }, body: "{}" });
+      expect(withAuth.status).toBe(200);
+    } finally {
+      await server.stop();
+    }
+  });
+});
+
 describe("OperatorGrantInbox — shared-kernel grant round-trip", () => {
   it("agent write blocked → human approves → minted grant authorizes the same kernel", () => {
     // One kernel, shared between the gateway (agent face) and control plane (human face).
@@ -286,6 +305,38 @@ describe("ControlPlaneServer — HTTP API", () => {
     const traces = await get("/traces") as { traces: Array<{ traceId: string; successRate: number }> };
     expect(traces.traces.some((t) => t.traceId === "trace-001")).toBe(true);
     expect(traces.traces.find((t) => t.traceId === "trace-001")!.successRate).toBe(1);
+  });
+
+  it("GET /replay/:traceId renders a visual timeline of the trace", async () => {
+    const now = Date.now();
+    const trace = {
+      traceId: "trace-replay",
+      sessionId: "sess-replay",
+      startTs: now - 500,
+      endTs: now,
+      events: [
+        { kind: "session_start", traceId: "trace-replay", sessionId: "sess-replay", ts: now - 500, seq: 0, topology: "ephemeral" },
+        { kind: "action", traceId: "trace-replay", sessionId: "sess-replay", ts: now - 400, seq: 1, command: { type: "navigate", url: "https://x.com" } },
+        { kind: "snapshot", traceId: "trace-replay", sessionId: "sess-replay", ts: now - 300, seq: 2, tier: "L1", url: "https://x.com", title: "X", nodeCount: 7, nodes: [] },
+        { kind: "action_result", traceId: "trace-replay", sessionId: "sess-replay", ts: now - 200, seq: 3, success: true, url: "https://x.com" },
+        { kind: "session_end", traceId: "trace-replay", sessionId: "sess-replay", ts: now, seq: 4, durationMs: 500 },
+      ],
+    };
+    await fetch(baseUrl + "/traces", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(trace) });
+
+    const list = await get("/replay") as { traces: string[] };
+    expect(list.traces).toContain("trace-replay");
+
+    const page = await fetch(baseUrl + "/replay/trace-replay");
+    expect(page.status).toBe(200);
+    const html = await page.text();
+    expect(html).toContain("Session replay");
+    expect(html).toContain("perceive"); // the snapshot lane rendered
+    expect(html).toContain("act navigate");
+    expect(html).toContain("7 nodes");
+
+    const missing = await fetch(baseUrl + "/replay/nope");
+    expect(missing.status).toBe(404);
   });
 
   it("POST /intent returns queued=true", async () => {

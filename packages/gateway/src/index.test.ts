@@ -184,7 +184,7 @@ describeIfBrowser("GatewayServer — browser integration", () => {
     });
 
     const kernel = new SecurityKernelImpl({
-      allowedOrigins: ["http://127.0.0.1"],
+      allowedOrigins: [] /* unrestricted: dynamic ports */,
       egressAllowlist: [],
       prohibitedActions: [],
     });
@@ -353,6 +353,64 @@ describeIfBrowser("GatewayServer — browser integration", () => {
     expect(result).toBe("bob");
 
     await client.callTool({ name: "session_destroy", arguments: { sessionId } });
+  });
+
+  it("perceive_subscribe pushes a delta notification when the DOM changes", async () => {
+    const { sessionId } = JSON.parse(toolText(await client.callTool({ name: "session_create", arguments: {} }))) as { sessionId: string };
+    await client.callTool({ name: "act_execute", arguments: { sessionId, command: { type: "navigate", url: serverUrl } } });
+    await client.callTool({ name: "perceive_snapshot", arguments: { sessionId, tier: "L1" } }); // baseline
+
+    const received: Array<{ method: string }> = [];
+    client.fallbackNotificationHandler = (n) => { received.push(n); return Promise.resolve(); };
+
+    const { subscriptionId } = JSON.parse(toolText(await client.callTool({
+      name: "perceive_subscribe", arguments: { sessionId, intervalMs: 300 },
+    }))) as { subscriptionId: string };
+
+    // Mutate the DOM so the next poll yields a delta.
+    await client.callTool({ name: "act_execute", arguments: { sessionId, command: { type: "fill", target: { nodeId: "x" }, value: "y" } } }).catch(() => { /* fill may miss; force a real change below */ });
+    await client.callTool({ name: "act_execute", arguments: { sessionId, command: { type: "navigate", url: serverUrl + "?v=2" } } });
+
+    await new Promise((r) => setTimeout(r, 1200));
+    expect(received.some((n) => n.method === "notifications/perceive")).toBe(true);
+
+    const { unsubscribed } = JSON.parse(toolText(await client.callTool({
+      name: "perceive_unsubscribe", arguments: { sessionId, subscriptionId },
+    }))) as { unsubscribed: boolean };
+    expect(unsubscribed).toBe(true);
+
+    await client.callTool({ name: "session_destroy", arguments: { sessionId } });
+  });
+
+  it("persistent persona retains storage across sessions", async () => {
+    // First session as persona "p1": write to localStorage on the fixture origin.
+    const { sessionId: s1 } = JSON.parse(toolText(await client.callTool({
+      name: "session_create", arguments: { topology: "persistent", personaId: "p1" },
+    }))) as { sessionId: string };
+    await client.callTool({ name: "act_execute", arguments: { sessionId: s1, command: { type: "navigate", url: serverUrl } } });
+    await client.callTool({ name: "extract_query", arguments: { sessionId: s1, query: "localStorage.setItem('persona_test','remembered') || 'set'" } });
+    await client.callTool({ name: "session_destroy", arguments: { sessionId: s1 } });
+
+    // Second session as the SAME persona: state was snapshotted + restored.
+    const { sessionId: s2 } = JSON.parse(toolText(await client.callTool({
+      name: "session_create", arguments: { topology: "persistent", personaId: "p1" },
+    }))) as { sessionId: string };
+    const { result } = JSON.parse(toolText(await client.callTool({
+      name: "extract_query", arguments: { sessionId: s2, query: "localStorage.getItem('persona_test')" },
+    }))) as { result: string };
+    expect(result).toBe("remembered");
+    await client.callTool({ name: "session_destroy", arguments: { sessionId: s2 } });
+
+    // A different persona does NOT see p1's state.
+    const { sessionId: s3 } = JSON.parse(toolText(await client.callTool({
+      name: "session_create", arguments: { topology: "persistent", personaId: "p2" },
+    }))) as { sessionId: string };
+    await client.callTool({ name: "act_execute", arguments: { sessionId: s3, command: { type: "navigate", url: serverUrl } } });
+    const { result: r2 } = JSON.parse(toolText(await client.callTool({
+      name: "extract_query", arguments: { sessionId: s3, query: "localStorage.getItem('persona_test')" },
+    }))) as { result: string | null };
+    expect(r2).toBeNull();
+    await client.callTool({ name: "session_destroy", arguments: { sessionId: s3 } });
   });
 
   it("session.list shows active sessions", async () => {

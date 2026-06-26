@@ -13,7 +13,12 @@
  */
 
 import { randomUUID } from "node:crypto";
-import type { GrantScope, SecurityKernel } from "@lattice/kernel";
+import type { GrantScope } from "@lattice/kernel";
+
+/** Minimal kernel slice the inbox needs — just the human-grant mint. */
+interface GrantMinter {
+  mintHumanGrant(scope: GrantScope): string;
+}
 
 export interface OperatorGrantRequest {
   readonly id: string;
@@ -29,7 +34,7 @@ export type OperatorGrantOutcome =
 export class OperatorGrantInbox {
   private readonly pending = new Map<string, OperatorGrantRequest>();
 
-  constructor(private readonly kernel: SecurityKernel) {}
+  constructor(private readonly kernel: GrantMinter) {}
 
   /** Raise a pending operator-grant request (mirrors the gateway handoff). */
   request(scope: GrantScope, summary: string): OperatorGrantRequest {

@@ -100,6 +100,8 @@ export interface SecurityKernel {
   classify(request: CapabilityRequest): PolicyClass;
   requestGrant(request: CapabilityRequest): Promise<GrantDecision>;
   checkEgress(req: EgressRequest): boolean;
+  /** Origin scoping: is a navigation target within the task's allowed origins? */
+  checkNavigation(targetUrl: string): boolean;
   /** Wrap page content in TaintedStr — it must never escape the quarantined channel. */
   taintContent(raw: string): TaintedStr;
   /** Register every string leaf of a value as tainted (page-origin observation). */

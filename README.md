@@ -94,6 +94,30 @@ curl -fsS http://localhost:8765/health     # {"status":"ok",...}
 Put a TLS-terminating reverse proxy (Caddy/nginx) in front for public exposure.
 Headless Chromium needs a large `/dev/shm`; the compose file sets `shm_size: 1gb`.
 
+### Unified process — `lattice serve`
+
+`apps/serve` boots **one process, one shared kernel**, with two faces: the MCP
+gateway (agents) and the control plane (humans). This is what realizes "UI and
+MCP share one policy/grant/audit slice" — UI-minted operator grants authorize
+the same kernel the gateway gates against, sessions populate the live theater,
+traces feed the replay browser, and agent-raised handoffs are resolvable from
+the control plane.
+
+```bash
+node apps/serve/dist/main.js
+# MCP gateway:   http://0.0.0.0:8765/mcp
+# Control plane: http://127.0.0.1:7900
+```
+
+Extra env on top of the gateway's: `CONTROL_PLANE_PORT` (default 7900),
+`LATTICE_VAULT_KEY` (32-byte hex — encrypts the vault at rest),
+`LATTICE_VAULT_PATH` (persist the encrypted vault), `LATTICE_NTFY_BASE` +
+`LATTICE_HANDOFF_KEY` (handoff push + signing), `LATTICE_TRACE_DIR` (where
+finished traces are written as Svod notes).
+
+The HTTP gateway is **multi-session**: each `initialize` opens its own MCP
+transport (pooled by `mcp-session-id`), so many agents connect concurrently.
+
 ## MCP tool reference
 
 All tools return MCP `text` content containing JSON. Browser sessions are
@@ -101,11 +125,13 @@ application-level: `session_create` returns a `sessionId` you pass to the rest.
 
 | Tool | Arguments | Returns |
 |---|---|---|
-| `session_create` | `topology?: "ephemeral"\|"persistent"` | `{ sessionId }` |
+| `session_create` | `topology?: "ephemeral"\|"persistent"`, `personaId?` | `{ sessionId }`; `persistent`+`personaId` resumes that persona's cookies/storage |
 | `session_destroy` | `sessionId` | `{ destroyed }` |
 | `session_list` | — | `{ sessions: string[] }` |
 | `perceive_snapshot` | `sessionId`, `tier?: "L0"\|"L1"\|"L2"\|"L3"` | Interaction Graph (+ delta vs previous snapshot); L3 adds a screenshot image block |
 | `perceive_delta` | `sessionId` | `{ delta, url }` since the last snapshot |
+| `perceive_subscribe` | `sessionId`, `intervalMs?` | streams `notifications/perceive` on every change; returns `{ subscriptionId }` |
+| `perceive_unsubscribe` | `sessionId`, `subscriptionId` | stops the stream |
 | `act_execute` | `sessionId`, `command: ActionCommand` | `{ success, url, delta, extracted? }` |
 | `extract_query` | `sessionId`, `query` | extracted page data |
 | `capability_check` | `sessionId` | page MCP-capability probe |
