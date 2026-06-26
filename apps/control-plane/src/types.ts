@@ -74,4 +74,10 @@ export interface ControlPlaneBackend {
   ): Promise<boolean>;
   /** Confirm a pending device with the OOB challenge it received. */
   verifyDevice(deviceId: string, challenge: string): boolean;
+  /** Apply a human policy edit to the LIVE kernel (floor re-asserted). */
+  applyPolicy(patch: Partial<PolicyConfig>): PolicyConfig;
+  /** Set the token budget from the UI. */
+  setBudget(limitTokens: number): void;
+  /** Human-initiated persona import from a real browser profile (credential-bearing). */
+  importPersona(personaId: string, profile: string, origins: string[]): Promise<{ imported: number; origins: string[] }>;
 }

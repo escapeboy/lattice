@@ -265,6 +265,16 @@ export class SecurityKernelImpl implements SecurityKernel {
     return this.operator.mintGrant(scope);
   }
 
+  recordHumanImport(personaId: string, origins: string[], cookieCount: number): void {
+    this.emit({
+      kind: "operator",
+      origin: "control-plane",
+      sessionId: "persona-import",
+      detail: `persona_import (human): ${cookieCount} cookies for [${origins.join(", ")}] → persona ${personaId} (values not exposed)`,
+      granted: true,
+    });
+  }
+
   authorizeOperator(req: OperatorRequest): OperatorDecision {
     const decision = this.operator.authorize(req);
     this.emit({

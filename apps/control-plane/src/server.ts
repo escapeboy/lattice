@@ -199,8 +199,29 @@ export class ControlPlaneServer {
     if (method === "PUT" && path === "/policy") {
       const body = await readBody(req);
       if (!body) { res.writeHead(400).end("No body"); return; }
-      const patch = JSON.parse(body) as Partial<PolicyConfig>;
-      json(res, this.policy.update(patch));
+      const patch = JSON.parse(body) as Partial<PolicyConfig> & { budgetLimit?: number };
+      // Apply to the LIVE kernel when wired (human is the grant authority; the
+      // floor still re-asserts). Fall back to the display-only editor otherwise.
+      const applied = this.backend ? this.backend.applyPolicy(patch) : this.policy.update(patch);
+      this.policy.update(applied); // keep the snapshot in sync for GET /policy
+      if (this.backend && typeof patch.budgetLimit === "number") this.backend.setBudget(patch.budgetLimit);
+      this.broadcast({ type: "policy", data: applied });
+      json(res, applied);
+      return;
+    }
+
+    // Human-initiated persona import from a real browser profile.
+    if (this.backend && method === "POST" && path === "/persona-import") {
+      const body = await readBody(req);
+      const { personaId, profile, origins } = (body ? JSON.parse(body) : {}) as
+        { personaId?: string; profile?: string; origins?: string[] };
+      if (!personaId || !origins || !origins.length) { res.writeHead(400).end("personaId and origins required"); return; }
+      try {
+        const result = await this.backend.importPersona(personaId, profile ?? "Default", origins);
+        json(res, { ...result, note: "credentials imported into the persona vault — values never exposed" });
+      } catch (e) {
+        res.writeHead(500, { "Content-Type": "application/json" }).end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
+      }
       return;
     }
 

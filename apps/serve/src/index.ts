@@ -13,6 +13,7 @@ import type { EngineAdapter } from "@lattice/engine";
 import type { SecurityKernel } from "@lattice/kernel";
 import { ControlPlaneServer } from "@lattice/control-plane";
 import { emitToSvod, type SvodWriteFn } from "@lattice/observability";
+import { importChromeCookies } from "./chrome-import.js";
 
 export interface LatticeCore {
   gateway: GatewayServer;
@@ -77,6 +78,18 @@ export function createLatticeCore(config: LatticeServeConfig): LatticeCore {
     submitHandoffInput: (handoffId, deviceId, sessionId, fieldNodeId, value) =>
       gateway.submitHandoffInput(handoffId, deviceId, sessionId, fieldNodeId, value),
     verifyDevice: (deviceId, challenge) => gateway.verifyDevice(deviceId, challenge),
+    applyPolicy: (patch) => {
+      const p = gateway.applyOperatorPolicy(patch);
+      return { allowedOrigins: p.allowedOrigins, egressAllowlist: p.egressAllowlist, prohibitedActions: p.prohibitedActions, requireGrant: p.requireGrant };
+    },
+    setBudget: (limit) => gateway.setOperatorBudget(limit),
+    importPersona: (personaId, profile, origins) => {
+      // Read + decrypt the human's Chrome cookies (prompts Keychain), scope by
+      // origin, and inject into the persona — values never leave this boundary.
+      const cookies = importChromeCookies(profile, origins);
+      const imported = gateway.importPersonaCookies(personaId, origins, cookies);
+      return Promise.resolve({ imported, origins });
+    },
   }, config.controlPlaneToken);
   ref.control = control;
 

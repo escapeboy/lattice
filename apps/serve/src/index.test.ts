@@ -57,6 +57,34 @@ describe("LatticeCore — UI and MCP share one grant slice", () => {
   });
 });
 
+describe("LatticeCore — human policy edit applies to the live kernel", () => {
+  it("PUT /policy widens egress live and re-asserts the constitutional floor", async () => {
+    const kernel = new SecurityKernelImpl({ allowedOrigins: [], egressAllowlist: [], prohibitedActions: [] });
+    const core = createLatticeCore({ engine: createEngineAdapter(), kernel });
+    const { url } = await core.control.start(0, "127.0.0.1");
+    try {
+      // Human edits policy from the UI: widen egress, and try to drop the floor.
+      const r = await fetch(url + "/policy", {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ egressAllowlist: ["https://api.partner.com"], prohibitedActions: ["only.this"], budgetLimit: 1234 }),
+      });
+      expect(r.ok).toBe(true);
+
+      // Live enforcement changed: partner origin now passes the egress firewall.
+      expect(kernel.checkEgress({ destination: "https://api.partner.com/v1", sourceOrigin: "https://app", taskOrigin: "https://app", sessionId: "s1" })).toBe(true);
+      // Floor re-asserted: payment stays prohibited despite the short list.
+      expect(kernel.classify({ actionType: "payment", origin: "x", sessionId: "s1", payload: null })).toBe("prohibited");
+      // The snapshot the UI reads reflects it.
+      const pol = await (await fetch(url + "/policy")).json() as { egressAllowlist: string[]; prohibitedActions: string[] };
+      expect(pol.egressAllowlist).toContain("https://api.partner.com");
+      expect(pol.prohibitedActions).toContain("payment");
+    } finally {
+      await core.gateway.stop();
+      await core.control.stop();
+    }
+  });
+});
+
 describe("LatticeCore — trace emission on teardown", () => {
   it("invokes the trace writer with a Svod path + metrics when a session ends", async () => {
     const exe = detectChromiumExecutable();
