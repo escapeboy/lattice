@@ -14,6 +14,7 @@ import type { SemanticEngine } from "@lattice/engine-adapter";
 import type { SecurityKernel } from "@lattice/kernel";
 import { ControlPlaneServer } from "@lattice/control-plane";
 import { emitToSvod, type SvodWriteFn, type PiiPolicy } from "@lattice/observability";
+import type { EgressPolicy } from "@lattice/egress-proxy";
 import { importChromeCookies } from "./chrome-import.js";
 
 export interface LatticeCore {
@@ -47,6 +48,8 @@ export interface LatticeServeConfig {
   traceWriter?: SvodWriteFn;
   /** PII redaction policy applied before traces persist to Svod (P1.1). Redacted by default. */
   piiPolicy?: PiiPolicy;
+  /** Ask-to-allow egress policy (learn mode): the operator surface reads pending + allows/denies. */
+  egressPolicy?: EgressPolicy;
   /** Bearer token required on the control plane's state-changing routes. */
   controlPlaneToken?: string;
   /** Bearer token required on the /mcp endpoint when set (A2). */
@@ -128,6 +131,9 @@ export function createLatticeCore(config: LatticeServeConfig): LatticeCore {
     },
     listPersonas: () => gateway.listPersonas(),
     listVault: () => gateway.listVaultEntries(),
+    egressPending: () => config.egressPolicy?.pendingList() ?? [],
+    egressAllow: (origin) => config.egressPolicy?.allow(origin),
+    egressDeny: (origin) => config.egressPolicy?.deny(origin),
   }, config.controlPlaneToken);
   ref.control = control;
 

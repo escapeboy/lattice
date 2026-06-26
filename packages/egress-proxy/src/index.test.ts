@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { createServer, request, type Server } from "node:http";
-import { EgressProxy, originAllowlist } from "./index.js";
+import { EgressProxy, originAllowlist, EgressPolicy } from "./index.js";
 
 /** A trivial upstream that echoes a marker, so we can see a request got through. */
 function startTarget(): Promise<{ server: Server; port: number }> {
@@ -98,5 +98,51 @@ describe("originAllowlist", () => {
     expect(allow("https://app.example.com")).toBe(true);
     expect(allow("https://api.partner.com")).toBe(true);
     expect(allow("https://attacker.example")).toBe(false);
+  });
+});
+
+describe("EgressPolicy — ask-to-allow (learn) mode", () => {
+  it("default-deny holds: an unknown origin is blocked and recorded pending", () => {
+    let t = 1000;
+    const p = new EgressPolicy(["https://allowed.com"], true, () => t++);
+    expect(p.decide("https://allowed.com")).toBe(true);
+    // unknown → blocked (nothing leaks), but surfaced for the operator
+    expect(p.decide("https://new.com")).toBe(false);
+    const pend = p.pendingList();
+    expect(pend.map((x) => x.origin)).toEqual(["https://new.com"]);
+    expect(pend[0]!.attempts).toBe(1);
+    // a retry bumps attempts but never auto-allows
+    expect(p.decide("https://new.com")).toBe(false);
+    expect(p.pendingList()[0]!.attempts).toBe(2);
+  });
+
+  it("operator allow lets it through from the next attempt and clears pending", () => {
+    const p = new EgressPolicy([], true);
+    expect(p.decide("https://x.com")).toBe(false);
+    p.allow("https://x.com");
+    expect(p.decide("https://x.com")).toBe(true);
+    expect(p.pendingList()).toEqual([]);
+    expect(p.allowList()).toContain("https://x.com");
+  });
+
+  it("operator deny keeps it blocked and stops re-prompting", () => {
+    const p = new EgressPolicy([], true);
+    expect(p.decide("https://bad.com")).toBe(false);
+    p.deny("https://bad.com");
+    expect(p.decide("https://bad.com")).toBe(false);
+    expect(p.pendingList()).toEqual([]); // no longer prompts
+  });
+
+  it("strict mode (learn=false) blocks unknowns WITHOUT prompting", () => {
+    const p = new EgressPolicy(["https://ok.com"], false);
+    expect(p.decide("https://ok.com")).toBe(true);
+    expect(p.decide("https://unknown.com")).toBe(false);
+    expect(p.pendingList()).toEqual([]);
+  });
+
+  it("decide is usable as the EgressProxy allow function (never silently allows)", () => {
+    const p = new EgressPolicy([], true);
+    const allow: (o: string) => boolean = p.decide;
+    expect(allow("https://anything.com")).toBe(false);
   });
 });

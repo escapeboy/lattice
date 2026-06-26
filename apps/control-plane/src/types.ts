@@ -84,4 +84,10 @@ export interface ControlPlaneBackend {
   listPersonas(): Array<{ personaId: string; origins: string[]; sessions: number }>;
   /** Operator read surface: vault entries as id/origin/label ONLY — never credentials. */
   listVault(): Array<{ id: string; origin: string; label: string }>;
+  /** Ask-to-allow egress: origins the agent tried to reach that are awaiting a decision. */
+  egressPending(): Array<{ origin: string; firstSeen: number; attempts: number }>;
+  /** Operator allows a pending egress origin (lets it through from the next attempt). */
+  egressAllow(origin: string): void;
+  /** Operator denies a pending egress origin (stays blocked, no re-prompt). */
+  egressDeny(origin: string): void;
 }

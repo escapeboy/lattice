@@ -20,7 +20,7 @@ import { createEngineAdapter, detectChromiumExecutable } from "@lattice/engine";
 import { AgentBrowserEngine } from "@lattice/engine-adapter";
 import { SecurityKernelImpl } from "@lattice/kernel";
 import { NtfyTransport, Vault } from "@lattice/gateway";
-import { EgressProxy, originAllowlist } from "@lattice/egress-proxy";
+import { EgressProxy, EgressPolicy, originAllowlist } from "@lattice/egress-proxy";
 import { createLatticeCore, resolveEngineKind } from "./index.js";
 
 function list(env: string | undefined): string[] {
@@ -52,9 +52,19 @@ async function main(): Promise<void> {
   // sees the destination, not the initiating page); provenance stays kernel-level.
   const allowedOrigins = list(process.env["LATTICE_ALLOWED_ORIGINS"]);
   const egressAllow = list(process.env["LATTICE_EGRESS_ALLOWLIST"]);
+  // Ask-to-allow (learn) mode: the proxy is ON even with no allowlist, and an
+  // unknown origin is BLOCKED but surfaced as pending for the operator to
+  // allow/deny (still default-deny — nothing leaks until a human says yes).
+  const egressLearn = process.env["LATTICE_EGRESS_LEARN"] === "1";
   let egressProxy: EgressProxy | undefined;
+  let egressPolicy: EgressPolicy | undefined;
   let proxyUrl: string | undefined;
-  if (allowedOrigins.length > 0 || egressAllow.length > 0) {
+  if (egressLearn) {
+    egressPolicy = new EgressPolicy([...allowedOrigins, ...egressAllow], true);
+    egressProxy = new EgressProxy({ allow: egressPolicy.decide });
+    proxyUrl = (await egressProxy.start()).url;
+    console.error(`Egress firewall active (ask-to-allow) — new origins are blocked and surfaced for approval. Proxy: ${proxyUrl}`);
+  } else if (allowedOrigins.length > 0 || egressAllow.length > 0) {
     egressProxy = new EgressProxy({ allow: originAllowlist(allowedOrigins, egressAllow) });
     proxyUrl = (await egressProxy.start()).url;
     console.error(`Egress firewall active — browser traffic gated through ${proxyUrl} (origin allowlist).`);
@@ -125,6 +135,7 @@ async function main(): Promise<void> {
     ...(piiPolicy ? { piiPolicy } : {}),
     ...(ntfyBase ? { handoffTransport: new NtfyTransport(ntfyBase) } : {}),
     ...(handoffKey ? { handoffSigningKey: handoffKey } : {}),
+    ...(egressPolicy ? { egressPolicy } : {}),
     controlPlaneToken: cpToken,
     mcpToken,
   });

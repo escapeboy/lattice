@@ -65,6 +65,9 @@ describe("ControlPlaneServer — native-timeline + operator read surfaces (D5)",
       importPersona: () => Promise.resolve({ imported: 0, origins: [] }),
       listPersonas: () => [{ personaId: "ada", origins: ["example.com"], sessions: 1 }],
       listVault: () => [{ id: "v1", origin: "https://example.com", label: "login" }],
+      egressPending: () => [{ origin: "https://new.com", firstSeen: 1, attempts: 2 }],
+      egressAllow: () => {},
+      egressDeny: () => {},
     };
   }
 
@@ -83,6 +86,28 @@ describe("ControlPlaneServer — native-timeline + operator read surfaces (D5)",
       expect(body.traceId).toBe("tEV");
       expect(body.events.length).toBe(1);
       expect(body.events[0]!.text).toContain("session start");
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("ask-to-allow egress: /egress/pending token-gated; allow/deny require origin + token", async () => {
+    const server = new ControlPlaneServer(undefined, mockBackend(), "secret-token");
+    const { url } = await server.start(0, "127.0.0.1");
+    try {
+      const auth = { headers: { Authorization: "Bearer secret-token" } };
+      // pending read is token-gated (reveals which origins the agent tried)
+      expect((await fetch(`${url}/egress/pending`)).status).toBe(401);
+      const pend = (await (await fetch(`${url}/egress/pending`, auth)).json()) as { pending: Array<{ origin: string }> };
+      expect(pend.pending[0]!.origin).toBe("https://new.com");
+      // allow/deny are state-changing → token + origin required
+      expect((await fetch(`${url}/egress/allow`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).status).toBe(401);
+      const noOrigin = await fetch(`${url}/egress/allow`, { method: "POST", headers: { ...auth.headers, "Content-Type": "application/json" }, body: "{}" });
+      expect(noOrigin.status).toBe(400);
+      const ok = await fetch(`${url}/egress/allow`, { method: "POST", headers: { ...auth.headers, "Content-Type": "application/json" }, body: JSON.stringify({ origin: "https://new.com" }) });
+      expect(ok.status).toBe(200);
+      const deny = await fetch(`${url}/egress/deny`, { method: "POST", headers: { ...auth.headers, "Content-Type": "application/json" }, body: JSON.stringify({ origin: "https://bad.com" }) });
+      expect(deny.status).toBe(200);
     } finally {
       await server.stop();
     }
