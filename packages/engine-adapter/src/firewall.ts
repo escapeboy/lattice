@@ -60,30 +60,31 @@ export const FORBIDDEN_URL_SCHEMES: ReadonlySet<string> = new Set([
   "view-source",
   "chrome",
   "chrome-extension",
+  "chrome-untrusted",
+  "devtools",
 ]);
 
 /**
  * Return the forbidden scheme of `raw`, or null if its scheme is not forbidden.
  *
- * Critically, this canonicalizes the SAME way the WHATWG URL parser (Chromium /
- * agent-browser) does BEFORE reading the scheme: it removes every ASCII tab
- * (0x09), LF (0x0A) and CR (0x0D) anywhere in the string, then strips leading C0
- * controls + space (code point <= 0x20). Without this, an obfuscated scheme such
- * as a tab inside "file" or a leading NUL slips past a naive prefix check while
- * the engine still resolves it to "file:". (Confirmed against the WHATWG parser.)
- * Implemented with char codes so no control characters appear in this source.
+ * Critically, this canonicalizes to a STRICT SUPERSET of any URL resolver before
+ * reading the scheme: it removes EVERY code point <= 0x20 (all C0 controls +
+ * space) anywhere in the string. The WHATWG parser removes tab/newline and
+ * leading control/space; Chromium's lenient omnibox fixup may also strip
+ * control/space from INSIDE the scheme token. So `fi<tab>le:`, `fi<FF>le:`,
+ * `fi<space>le:`, leading NUL — anything a downstream resolver could canonicalize
+ * to "file:" — is caught. This cannot false-block http/https/data/about (their
+ * schemes contain no <= 0x20 byte). Char codes only, so no control chars in
+ * source. (Confirmed against the WHATWG parser; superset covers lenient fixup.)
  */
 export function forbiddenUrlScheme(raw: string): string | null {
   let s = "";
   for (let i = 0; i < raw.length; i++) {
-    const c = raw.charCodeAt(i);
-    if (c !== 0x09 && c !== 0x0a && c !== 0x0d) s += raw[i];
+    if (raw.charCodeAt(i) > 0x20) s += raw[i];
   }
-  let start = 0;
-  while (start < s.length && s.charCodeAt(start) <= 0x20) start++;
-  const colon = s.indexOf(":", start);
+  const colon = s.indexOf(":");
   if (colon < 0) return null;
-  const scheme = s.slice(start, colon).toLowerCase();
+  const scheme = s.slice(0, colon).toLowerCase();
   return FORBIDDEN_URL_SCHEMES.has(scheme) ? scheme : null;
 }
 

@@ -197,8 +197,15 @@ describe("@lattice/kernel — origin scoping (navigation)", () => {
     expect(k.checkNavigation("file\t:///etc/passwd")).toBe(false); // tab before colon
     expect(k.checkNavigation("FILE:///etc/passwd")).toBe(false); // uppercase
     expect(k.checkNavigation("  file:///etc/passwd")).toBe(false); // leading whitespace
+    // Control/space INSIDE the scheme that a lenient resolver strips back to file:
+    const c = String.fromCharCode;
+    expect(k.checkNavigation("fi le:///etc/passwd")).toBe(false); // space in scheme
+    expect(k.checkNavigation("fi" + c(0x0c) + "le:///etc/passwd")).toBe(false); // form feed
+    expect(k.checkNavigation("fi" + c(0x00) + "le:///etc/passwd")).toBe(false); // NUL
+    expect(k.checkNavigation("devtools://devtools/x")).toBe(false); // privileged scheme
     // Legit navigation with no forbidden scheme still passes.
     expect(k.checkNavigation("https://example.com/path")).toBe(true);
+    expect(k.checkNavigation("https://example.com/a?q=x y")).toBe(true); // space in query is fine
   });
 });
 
