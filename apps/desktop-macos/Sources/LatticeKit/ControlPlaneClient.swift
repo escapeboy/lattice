@@ -147,6 +147,19 @@ public struct ControlPlaneClient: Sendable {
         return ((try? JSONSerialization.jsonObject(with: data)) as? [String: Any])?["resolved"] as? Bool ?? false
     }
 
+    /// Human-initiated persona import from a real browser profile. The backend
+    /// reads + decrypts the operator's Chrome cookies for `origins` and scopes
+    /// them to the persona — raw values never reach the model/agent. Returns the
+    /// number of cookies imported.
+    public func importPersona(personaId: String, profile: String, origins: [String]) async throws -> Int {
+        let body = try JSONSerialization.data(withJSONObject: [
+            "personaId": personaId, "profile": profile, "origins": origins,
+        ])
+        let (data, _) = try await send("POST", "/persona-import", body: body)
+        let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        return (obj?["imported"] as? Int) ?? 0
+    }
+
     // MARK: plumbing
 
     private func get<T: Decodable>(_ path: String, _ key: String) async throws -> [T] {

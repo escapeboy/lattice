@@ -6,6 +6,12 @@ import SwiftUI
 public struct PersonasView: View {
     @ObservedObject var model: ControlPlaneModel
 
+    @State private var importPersonaId = ""
+    @State private var importProfile = "Default"
+    @State private var importOrigins = ""
+    @State private var importing = false
+    @State private var importResult: String?
+
     public init(model: ControlPlaneModel) { self.model = model }
 
     public var body: some View {
@@ -24,6 +30,41 @@ public struct PersonasView: View {
                             }
                         }
                     }
+                }
+
+                Divider()
+
+                section("Import browser session", systemImage: "square.and.arrow.down") {
+                    Text("Bring your logged-in cookies from Chrome into a persona — the agent then browses as you. Cookies are read & decrypted locally (the Keychain may prompt); raw values never reach the model or agent.")
+                        .font(.caption).foregroundStyle(.secondary)
+                    TextField("Persona name (e.g. me)", text: $importPersonaId).textFieldStyle(.roundedBorder)
+                    TextField("Chrome profile (e.g. Default)", text: $importProfile).textFieldStyle(.roundedBorder)
+                    TextField("Origins, comma-separated (e.g. https://github.com)", text: $importOrigins).textFieldStyle(.roundedBorder)
+                    HStack(spacing: 8) {
+                        Button {
+                            let origins = importOrigins
+                                .split(separator: ",")
+                                .map { $0.trimmingCharacters(in: .whitespaces) }
+                                .filter { !$0.isEmpty }
+                            guard !importPersonaId.isEmpty, !origins.isEmpty else {
+                                importResult = "Enter a persona name and at least one origin."
+                                return
+                            }
+                            importing = true; importResult = nil
+                            Task {
+                                let n = await model.importPersona(
+                                    personaId: importPersonaId,
+                                    profile: importProfile.isEmpty ? "Default" : importProfile,
+                                    origins: origins)
+                                importing = false
+                                importResult = n.map { "Imported \($0) cookie(s) into “\(importPersonaId)”." }
+                                    ?? (model.lastError ?? "Import failed.")
+                            }
+                        } label: { Label("Import from Chrome", systemImage: "square.and.arrow.down") }
+                        .disabled(importing || importPersonaId.isEmpty || importOrigins.isEmpty)
+                        if importing { ProgressView().controlSize(.small) }
+                    }
+                    if let importResult { Text(importResult).font(.caption).foregroundStyle(.secondary) }
                 }
 
                 Divider()
