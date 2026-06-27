@@ -17,5 +17,11 @@
     <true/>
     <key>com.apple.security.network.server</key>
     <true/>
+    <!-- NOTE: vault-key persistence in the data-protection keychain would use a
+         `keychain-access-groups` entitlement (Team UQK5BS5U9A) — but that is a
+         RESTRICTED entitlement: it requires an embedded provisioning profile, and
+         without one the signed app fails to launch (launchd error 163). Until a
+         provisioning profile for net.lattice.desktop is created (Apple Developer
+         portal), the vault stays ephemeral. Do NOT re-add this without the profile. -->
 </dict>
 </plist>
