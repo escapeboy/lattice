@@ -33,6 +33,9 @@ rm -rf "$APP"
 mkdir -p "$CONTENTS/MacOS" "$CONTENTS/Resources"
 cp "$BIN_PATH/Lattice" "$CONTENTS/MacOS/Lattice"
 cp Info.plist "$CONTENTS/Info.plist"
+# App icon (Finder/About) — referenced by CFBundleIconFile=AppIcon. Regenerate
+# with `swift Scripts/make-icon.swift Signing` if missing.
+[ -f Signing/AppIcon.icns ] && cp Signing/AppIcon.icns "$CONTENTS/Resources/AppIcon.icns"
 
 if [ -d "$ROOT/build/backend" ]; then
   echo "==> embedding backend → Contents/Resources/backend"
