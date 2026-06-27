@@ -11,9 +11,14 @@ import PackageDescription
 let package = Package(
     name: "Lattice",
     platforms: [.macOS(.v13)],
+    dependencies: [
+        // Sparkle: in-app auto-update for Developer-ID (non-App-Store) macOS apps.
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.6.0"),
+    ],
     targets: [
         .target(
             name: "LatticeKit",
+            dependencies: [.product(name: "Sparkle", package: "Sparkle")],
             path: "Sources/LatticeKit"
         ),
         .executableTarget(

@@ -35,6 +35,28 @@ while IFS= read -r -d '' bin; do
   fi
 done < <(find "$APP/Contents/Resources/backend" -type f -print0)
 
+# Sparkle.framework: sign its helpers/XPC services inside-out. Use the app's
+# JIT entitlements only on the framework itself; the nested XPC services and
+# helpers keep their OWN entitlements (the Downloader is sandboxed), so preserve
+# them rather than overwriting with bun's JIT set.
+FW="$APP/Contents/Frameworks/Sparkle.framework"
+if [ -d "$FW" ]; then
+  echo "==> signing Sparkle.framework (inside-out, preserving helper entitlements)"
+  SP=(--force --options runtime --preserve-metadata=entitlements --sign "$IDENTITY")
+  [ "$IDENTITY" != "-" ] && SP+=(--timestamp)
+  for item in \
+    "$FW/Versions/B/XPCServices/Downloader.xpc" \
+    "$FW/Versions/B/XPCServices/Installer.xpc" \
+    "$FW/Versions/B/Autoupdate" \
+    "$FW/Versions/B/Updater.app" \
+    "$FW/Versions/B/Sparkle"; do
+    [ -e "$item" ] && { echo "    sign $item"; codesign "${SP[@]}" "$item"; }
+  done
+  FWSIGN=(--force --options runtime --sign "$IDENTITY")
+  [ "$IDENTITY" != "-" ] && FWSIGN+=(--timestamp)
+  codesign "${FWSIGN[@]}" "$FW"
+fi
+
 echo "==> signing $APP"
 codesign "${OPTS[@]}" "$APP"
 

@@ -42,6 +42,15 @@ if [ -d "$ROOT/build/backend" ]; then
   cp -R "$ROOT/build/backend" "$CONTENTS/Resources/backend"
 fi
 
+# Embed Sparkle.framework (auto-update) and point the app's rpath at it. SwiftPM
+# copies the framework next to the build product but does not bundle it.
+if [ -d "$BIN_PATH/Sparkle.framework" ]; then
+  echo "==> embedding Sparkle.framework → Contents/Frameworks"
+  mkdir -p "$CONTENTS/Frameworks"
+  cp -R "$BIN_PATH/Sparkle.framework" "$CONTENTS/Frameworks/Sparkle.framework"
+  install_name_tool -add_rpath "@executable_path/../Frameworks" "$CONTENTS/MacOS/Lattice" 2>/dev/null || true
+fi
+
 # Ad-hoc dev signature so the bundle launches locally. Developer ID signing +
 # notarization is D7 and requires the user's identity.
 echo "==> ad-hoc codesign (dev)"

@@ -40,6 +40,10 @@ public struct MenuBarContent: View {
             }
             .disabled(!isRunning && !stack.firstRunNeeded)
 
+            Button("Check for Updates…") {
+                UpdaterController.shared.checkForUpdates()
+            }
+
             Button("Quit Lattice") {
                 NSApplication.shared.terminate(nil)
             }
