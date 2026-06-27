@@ -155,9 +155,10 @@ export interface PendingEgress {
  * machine) and recorded as `pending` for the operator to decide. The operator's
  * choice mutates the live policy — `allow` lets it through from the next attempt
  * on, `deny` keeps it blocked without re-prompting. This never silently allows:
- * it turns a hard block into a block-and-ask, so the egress boundary (and the
- * 20/20 guarantee) stays intact — the agent simply can't reach a new origin
- * until a human says yes.
+ * it turns a hard block into a block-and-ask, so the proxy's default-deny
+ * egress boundary stays intact — the agent simply can't reach a new origin
+ * until a human says yes. (This boundary is HTTP-only: the proxy never sees
+ * HTTPS sub-resource egress — see SECURITY.md §4c.)
  */
 export class EgressPolicy {
   private readonly allowed: Set<string>;

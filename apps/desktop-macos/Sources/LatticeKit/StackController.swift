@@ -125,8 +125,10 @@ public final class StackController: ObservableObject {
 /// Desktop egress posture (ADR 0003 D6): the egress proxy is ON by default,
 /// configured through a guided first-run allowlist. On desktop there is no infra
 /// layer behind the proxy, so it is the SOLE egress defense — which is why the
-/// secure config is made the default via setup UX (closing the server's 18/20
-/// zero-config hole to 20/20) rather than left to an env var.
+/// secure config is made the default via setup UX (closing the server's
+/// zero-config HTTP-egress hole: 18/22 → 20/22 configured) rather than left to
+/// an env var. The proxy gates HTTP only — the 2 HTTPS egress-exfil vectors
+/// stay unwired on the app path (see SECURITY.md §4c).
 public enum DesktopEgress {
     private static let originsKey = "net.lattice.allowedOrigins"
     private static let configuredKey = "net.lattice.egressConfigured"
