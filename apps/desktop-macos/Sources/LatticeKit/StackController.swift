@@ -113,6 +113,10 @@ public final class StackController: ObservableObject {
             "LATTICE_MCP_TOKEN": mcpToken,
             "LATTICE_CP_TOKEN": cpToken,
             "LATTICE_TRACE_DIR": dataDir.appendingPathComponent("traces").path,
+            // Parent-death watchdog: the backend polls this PID and reaps its
+            // detached agent-browser daemon when the app dies (the app's own quit
+            // teardown is unreliable for a MenuBarExtra/LSUIElement app).
+            "LATTICE_PARENT_PID": String(ProcessInfo.processInfo.processIdentifier),
         ]
         // Vault → Keychain (D5): the 64-hex encryption key lives in the macOS
         // Keychain; the vault file is encrypted with it and persists across runs.
@@ -129,7 +133,9 @@ public final class StackController: ObservableObject {
             env["LATTICE_VAULT_KEY"] = vaultKey
             env["LATTICE_VAULT_PATH"] = vaultPath.path
         }
-        // Desktop egress posture (D6) is layered in later; D2 just boots the stack.
+        // Desktop egress (D6): currently a no-op — `environment()` returns empty
+        // because the app proxy breaks HTTPS (see DesktopEgress). Merged anyway so
+        // re-enabling later (post HTTPS-gating) is a one-line change there.
         env.merge(DesktopEgress.environment()) { _, new in new }
         return env
     }

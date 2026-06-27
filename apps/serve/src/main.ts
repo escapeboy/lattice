@@ -14,6 +14,7 @@
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
+import { spawnSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { createEngineAdapter, detectChromiumExecutable } from "@lattice/engine";
@@ -140,18 +141,59 @@ async function main(): Promise<void> {
     mcpToken,
   });
 
+  // Hard-reap any agent-browser daemon we spawned. The daemon `setsid`-detaches
+  // into its own session, so it survives the backend's process group AND the
+  // desktop app's quit (whose AppKit termination callbacks are unreliable for a
+  // MenuBarExtra app). We match by the binary path under our own working dir
+  // (cwd = the backend dir, where node_modules/agent-browser is staged), so only
+  // this stack's engine is killed — never another install.
+  const engineFragment = join(process.cwd(), "node_modules", "agent-browser");
+  const reapEngineDaemons = (): void => {
+    try {
+      const out = spawnSync("ps", ["-axo", "pid=,command="], { encoding: "utf8" }).stdout ?? "";
+      for (const line of out.split("\n")) {
+        const m = line.trim().match(/^(\d+)\s+(.*)$/);
+        if (m && m[1] && m[2]?.includes(engineFragment) && Number(m[1]) !== process.pid) {
+          try { process.kill(Number(m[1]), "SIGKILL"); } catch { /* already gone */ }
+        }
+      }
+    } catch { /* ps unavailable — best effort */ }
+  };
+
+  let shuttingDown = false;
   const shutdown = () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     void (async () => {
-      await gateway.stop();
-      await control.stop();
-      await cdpEngine?.shutdown();
-      await buildOnEngine?.shutdown();
-      await egressProxy?.stop();
+      await gateway.stop().catch(() => undefined);
+      await control.stop().catch(() => undefined);
+      await cdpEngine?.shutdown().catch(() => undefined);
+      await buildOnEngine?.shutdown().catch(() => undefined);
+      await egressProxy?.stop().catch(() => undefined);
+      reapEngineDaemons(); // backstop: kill any daemon the graceful close missed
       process.exit(0);
     })();
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+  // Parent-death watchdog: the desktop app passes its own PID as LATTICE_PARENT_PID
+  // and we poll it with `kill(pid, 0)`. When the app dies — even via SIGKILL at the
+  // macOS force-quit deadline, whose AppKit callbacks never run — the probe throws
+  // ESRCH and we shut down, reaping the detached engine daemon. We watch the PID
+  // (not `process.ppid`) because the bun single-binary re-execs, so our ppid is
+  // unreliable. Unset for `docker compose`/CLI runs → no watchdog.
+  const parentPid = Number(process.env["LATTICE_PARENT_PID"] ?? 0);
+  if (Number.isInteger(parentPid) && parentPid > 1) {
+    const watchdog = setInterval(() => {
+      try {
+        process.kill(parentPid, 0); // probe only — throws if the app is gone
+      } catch {
+        clearInterval(watchdog);
+        shutdown();
+      }
+    }, 1000);
+    watchdog.unref();
+  }
 
   const { url: mcpUrl } = await gateway.startHttp(gwPort, gwHost);
   const { url: cpUrl } = await control.start(cpPort, "127.0.0.1");
