@@ -141,3 +141,73 @@ export function originAllowlist(taskOrigins: ReadonlyArray<string>, egressAllowl
   const allowed = new Set([...taskOrigins, ...egressAllowlist]);
   return (origin: string) => allowed.has(origin);
 }
+
+export interface PendingEgress {
+  readonly origin: string;
+  readonly firstSeen: number;
+  readonly attempts: number;
+}
+
+/**
+ * Stateful egress decision for "ask-to-allow" (learn) mode.
+ *
+ * Default-deny is PRESERVED: an unknown origin is BLOCKED (nothing leaves the
+ * machine) and recorded as `pending` for the operator to decide. The operator's
+ * choice mutates the live policy — `allow` lets it through from the next attempt
+ * on, `deny` keeps it blocked without re-prompting. This never silently allows:
+ * it turns a hard block into a block-and-ask, so the egress boundary (and the
+ * 20/20 guarantee) stays intact — the agent simply can't reach a new origin
+ * until a human says yes.
+ */
+export class EgressPolicy {
+  private readonly allowed: Set<string>;
+  private readonly denied = new Set<string>();
+  private readonly pending = new Map<string, { firstSeen: number; attempts: number }>();
+
+  constructor(
+    seedAllow: Iterable<string> = [],
+    private readonly learn = true,
+    private readonly now: () => number = () => Date.now(),
+  ) {
+    this.allowed = new Set(seedAllow);
+  }
+
+  /** Use as the EgressProxy `allow` function. Records unknown origins as pending. */
+  readonly decide = (origin: string): boolean => {
+    if (this.allowed.has(origin)) return true;
+    if (this.denied.has(origin)) return false;
+    if (this.learn && !this.pending.has(origin)) {
+      this.pending.set(origin, { firstSeen: this.now(), attempts: 0 });
+    }
+    if (this.learn) {
+      const p = this.pending.get(origin)!;
+      this.pending.set(origin, { firstSeen: p.firstSeen, attempts: p.attempts + 1 });
+    }
+    return false; // unknown → blocked until the operator allows it
+  };
+
+  /** Operator: permit this origin from now on (clears pending/denied). */
+  allow(origin: string): void {
+    this.allowed.add(origin);
+    this.pending.delete(origin);
+    this.denied.delete(origin);
+  }
+
+  /** Operator: keep this origin blocked and stop prompting for it. */
+  deny(origin: string): void {
+    this.denied.add(origin);
+    this.pending.delete(origin);
+  }
+
+  pendingList(): PendingEgress[] {
+    return [...this.pending].map(([origin, v]) => ({ origin, firstSeen: v.firstSeen, attempts: v.attempts }));
+  }
+
+  allowList(): string[] {
+    return [...this.allowed];
+  }
+
+  get learnMode(): boolean {
+    return this.learn;
+  }
+}

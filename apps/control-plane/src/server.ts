@@ -167,7 +167,8 @@ export class ControlPlaneServer {
     // hold credentials / which personas exist) — token-gated like /replay, even
     // though they never return secret VALUES.
     const isPiiRead = method === "GET" &&
-      (path === "/replay" || path.startsWith("/replay/") || path === "/vault" || path === "/personas");
+      (path === "/replay" || path.startsWith("/replay/") || path === "/vault" || path === "/personas" ||
+        path === "/egress/pending");
     if (this.authToken && (method !== "GET" || isPiiRead)) {
       const auth = req.headers["authorization"];
       if (auth !== `Bearer ${this.authToken}`) {
@@ -290,6 +291,30 @@ export class ControlPlaneServer {
     }
     if (this.backend && method === "GET" && path === "/vault") {
       json(res, { vault: this.backend.listVault() });
+      return;
+    }
+
+    // ── Ask-to-allow egress (learn mode): pending origins + allow/deny ─────────
+    if (this.backend && method === "GET" && path === "/egress/pending") {
+      json(res, { pending: this.backend.egressPending() });
+      return;
+    }
+    if (this.backend && method === "POST" && path === "/egress/allow") {
+      const body = await readBody(req);
+      const { origin } = (body ? JSON.parse(body) : {}) as { origin?: string };
+      if (!origin) { res.writeHead(400).end("origin required"); return; }
+      this.backend.egressAllow(origin);
+      this.broadcast({ type: "egress", data: this.backend.egressPending() });
+      json(res, { allowed: origin });
+      return;
+    }
+    if (this.backend && method === "POST" && path === "/egress/deny") {
+      const body = await readBody(req);
+      const { origin } = (body ? JSON.parse(body) : {}) as { origin?: string };
+      if (!origin) { res.writeHead(400).end("origin required"); return; }
+      this.backend.egressDeny(origin);
+      this.broadcast({ type: "egress", data: this.backend.egressPending() });
+      json(res, { denied: origin });
       return;
     }
 
