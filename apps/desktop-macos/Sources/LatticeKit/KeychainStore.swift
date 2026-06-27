@@ -4,6 +4,15 @@ import Security
 /// Stores Lattice secrets in the macOS Keychain (Security framework) rather than
 /// a plaintext file (ADR 0003 D5). The vault's encryption key lives here; the
 /// encrypted vault file is useless without it.
+///
+/// Uses the **data-protection keychain** (not the legacy file keychain). The file
+/// keychain binds an item's ACL to the creating binary's code signature and pops
+/// a blocking "another app wants to access" SecurityAgent prompt when a
+/// differently-signed binary reads it — which, under an unstable ad-hoc dev
+/// signature, freezes the app at launch. The data-protection keychain instead
+/// scopes items by access group and simply returns `errSecItemNotFound` on a
+/// mismatch (no prompt), so the caller mints a fresh key. On ad-hoc builds
+/// without a keychain entitlement the ops fail cleanly → ephemeral vault.
 public enum KeychainStore {
     public static let service = "net.lattice.desktop"
 
@@ -14,6 +23,7 @@ public enum KeychainStore {
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
+            kSecUseDataProtectionKeychain as String: true,
         ]
         var item: CFTypeRef?
         guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
@@ -28,6 +38,7 @@ public enum KeychainStore {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
+            kSecUseDataProtectionKeychain as String: true,
         ]
         SecItemDelete(base as CFDictionary)
         var add = base
@@ -41,6 +52,7 @@ public enum KeychainStore {
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
+            kSecUseDataProtectionKeychain as String: true,
         ] as CFDictionary)
     }
 

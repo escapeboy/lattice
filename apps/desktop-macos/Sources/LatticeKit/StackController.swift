@@ -118,9 +118,16 @@ public final class StackController: ObservableObject {
         // Keychain; the vault file is encrypted with it and persists across runs.
         // If the Keychain is unavailable, fall back to an ephemeral vault (no
         // LATTICE_VAULT_PATH) so the stack still boots.
+        let vaultPath = dataDir.appendingPathComponent("vault.json")
+        // If the key can't be read non-interactively (fresh install, or the
+        // ad-hoc signature changed so the item's ACL no longer matches), we mint
+        // a new key — which makes any existing vault.json undecryptable. Drop the
+        // stale file so the backend boots a fresh vault instead of failing.
+        let hadKey = KeychainStore.read("vault-key") != nil
         if let vaultKey = KeychainStore.getOrCreateHexKey("vault-key") {
+            if !hadKey { try? FileManager.default.removeItem(at: vaultPath) }
             env["LATTICE_VAULT_KEY"] = vaultKey
-            env["LATTICE_VAULT_PATH"] = dataDir.appendingPathComponent("vault.json").path
+            env["LATTICE_VAULT_PATH"] = vaultPath.path
         }
         // Desktop egress posture (D6) is layered in later; D2 just boots the stack.
         env.merge(DesktopEgress.environment()) { _, new in new }
