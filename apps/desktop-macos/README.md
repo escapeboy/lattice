@@ -23,10 +23,13 @@ macOS-exclusive.
 - **Native integrations** — Vault encryption key in the **macOS Keychain**;
   human-handoff approvals as **native notifications** with Approve/Deny
   (first-claim-wins); menubar live status.
-- **Egress firewall ON by default** via a guided **first-run allowlist** — the
-  desktop's secure default (Gate 2 = 20/22; the app proxy is the sole egress layer
-  here and gates **HTTP only** — HTTPS sub-resource egress is not yet app-gated,
-  see SECURITY.md §4c).
+- **Egress firewall — OFF by default** (currently). The app-level proxy gates
+  **HTTP only** and breaks HTTPS navigation entirely (Chromium routes HTTPS
+  through the proxy, which can't tunnel the CONNECT → `net::ERR_EMPTY_RESPONSE`
+  on every load). An ON-by-default firewall therefore made the browser unusable,
+  so egress ships **disabled** until app-level HTTPS gating lands (roadmap). The
+  allowlist/first-run plumbing is retained, dormant. HTTPS exfil compensating
+  control today = network/infra layer (squid/pf). See SECURITY.md §4c.
 
 ## Layout
 
@@ -73,8 +76,9 @@ handles certificates. See **[NOTARIZATION.md](./NOTARIZATION.md)**.
 ## Status
 
 D0–D7 complete: supervisor, embedded bun backend, native MCP/SSE client, native
-control plane, Keychain + notifications, egress-on-by-default (Gate 2 = 20/22 —
-HTTP egress gated, HTTPS not yet app-gated), hardened dev-signed `.app` + `.dmg`.
+control plane, Keychain + notifications, egress **disabled by default** (the
+app proxy breaks HTTPS navigation — see above; ON-by-default was a release
+blocker that bricked the browser), hardened dev-signed `.app` + `.dmg`.
 A **notarized** release awaits a Developer ID
 signature (NOTARIZATION.md). Windows/Linux stay console-only — this app is a
 macOS-exclusive face on the same backend.

@@ -80,11 +80,17 @@ public final class StackController: ObservableObject {
         }
     }
 
-    /// True until the operator completes the guided first-run egress allowlist.
-    public var firstRunNeeded: Bool { !egressConfigured }
+    /// Desktop egress is OFF by default, so first-run never blocks startup. The
+    /// app-level proxy gates HTTP only and BREAKS HTTPS navigation: Chromium
+    /// routes HTTPS through the proxy, which can't tunnel the CONNECT, so every
+    /// navigation fails with net::ERR_EMPTY_RESPONSE. Forcing the egress setup
+    /// therefore shipped a browser that can't load HTTPS. Re-enable the guided
+    /// first-run when app-level HTTPS gating lands (plans/https-egress-roadmap).
+    public var firstRunNeeded: Bool { false }
 
-    /// Persist the first-run allowlist and restart the stack so the egress proxy
-    /// comes up ON with it (the sole egress layer on desktop — D6).
+    /// Persist an allowlist (kept for the future HTTPS-gating work) and restart.
+    /// NOTE: `environment()` does not wire this to the running stack today —
+    /// egress is disabled on desktop until HTTPS gating exists. Dormant.
     public func applyAllowlist(_ origins: [String]) {
         DesktopEgress.setAllowlist(origins)
         egressConfigured = true
@@ -122,13 +128,17 @@ public final class StackController: ObservableObject {
     }
 }
 
-/// Desktop egress posture (ADR 0003 D6): the egress proxy is ON by default,
-/// configured through a guided first-run allowlist. On desktop there is no infra
-/// layer behind the proxy, so it is the SOLE egress defense — which is why the
-/// secure config is made the default via setup UX (closing the server's
-/// zero-config HTTP-egress hole: 18/22 → 20/22 configured) rather than left to
-/// an env var. The proxy gates HTTP only — the 2 HTTPS egress-exfil vectors
-/// stay unwired on the app path (see SECURITY.md §4c).
+/// Desktop egress posture (ADR 0003 D6) — DISABLED by default.
+///
+/// The original design shipped the egress proxy ON via a guided first-run
+/// allowlist. But the app-level proxy gates HTTP only and breaks HTTPS
+/// navigation entirely: Chromium routes HTTPS through the proxy, the proxy
+/// cannot tunnel the CONNECT, and every navigation fails with
+/// net::ERR_EMPTY_RESPONSE — i.e. ON-by-default made the browser unusable.
+/// Until app-level HTTPS gating exists (plans/https-egress-roadmap), egress is
+/// OFF on desktop: `environment()` ships no proxy and first-run does not force
+/// setup. The allowlist store below is retained, dormant, for that future work.
+/// HTTPS exfil compensating control today = network/infra layer (squid/pf).
 public enum DesktopEgress {
     private static let originsKey = "net.lattice.allowedOrigins"
     private static let configuredKey = "net.lattice.egressConfigured"
@@ -147,10 +157,9 @@ public enum DesktopEgress {
         UserDefaults.standard.set(true, forKey: configuredKey)
     }
 
-    /// Env for the backend: when an allowlist is set, ship it so the egress proxy
-    /// starts ON (origin-gated). Empty before first-run.
-    public static func environment() -> [String: String] {
-        let origins = allowlist
-        return origins.isEmpty ? [:] : ["LATTICE_ALLOWED_ORIGINS": origins.joined(separator: ",")]
-    }
+    /// Env for the backend. Egress is DISABLED on desktop: the proxy gates HTTP
+    /// only and breaks HTTPS navigation (ERR_EMPTY_RESPONSE), so we ship NO proxy
+    /// env — otherwise the browser can't load any HTTPS page. The allowlist store
+    /// stays for future HTTPS-gating work but is intentionally not wired here.
+    public static func environment() -> [String: String] { [:] }
 }
