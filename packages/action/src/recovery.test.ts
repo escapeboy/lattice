@@ -43,6 +43,20 @@ describe("locateInIG — re-anchor then role+attribute fallback", () => {
     const gone: LocatableNode[] = [{ id: "button-q" as NodeId, role: "button", label: "Other" }];
     expect(locateInIG(target, gone, () => undefined)).toEqual({});
   });
+  it("survives a route-change: relocates by tolerant role+label among an all-new subtree (smoke #6)", () => {
+    // Hard SPA route change — the whole subtree is replaced. The control has a
+    // brand-new id, sits among different siblings, and its label gained a
+    // decorative glyph. rung-1 (stable id) misses; rung-2 must still find it via
+    // the tolerant label match (so route-change recovery isn't only proven for a
+    // simple re-render).
+    const afterRoute: LocatableNode[] = [
+      { id: "link-home" as NodeId, role: "link", label: "Home" },
+      { id: "button-newid" as NodeId, role: "button", label: "Save →" },
+      { id: "button-other" as NodeId, role: "button", label: "Discard" },
+    ];
+    const r = locateInIG(target, afterRoute, (id) => (id === ("button-newid" as NodeId) ? "e42" : undefined));
+    expect(r).toEqual({ altLocatorRef: "e42" });
+  });
 });
 
 describe("RecoveryExecutor — bounded async ladder (no blind retry)", () => {
