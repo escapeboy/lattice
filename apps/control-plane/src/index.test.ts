@@ -351,6 +351,21 @@ describe("ControlPlaneServer — HTTP API", () => {
     expect(html).toContain("approval");
   });
 
+  it("GET /agent-prompt returns the agent system prompt as plain text", async () => {
+    const r = await fetch(baseUrl + "/agent-prompt");
+    expect(r.headers.get("content-type")).toContain("text/plain");
+    const text = await r.text();
+    expect(text).toContain("Lattice");
+    expect(text).toContain("perceive_snapshot");
+    expect(text).toContain("NEVER type a password");
+  });
+
+  it("GET / includes the Copy agent prompt button", async () => {
+    const html = await (await fetch(baseUrl + "/")).text();
+    expect(html).toContain("Copy agent prompt");
+    expect(html).toContain("copyPrompt()");
+  });
+
   it("GET /sessions returns empty list initially", async () => {
     const data = await get("/sessions") as { sessions: unknown[] };
     expect(data.sessions).toHaveLength(0);

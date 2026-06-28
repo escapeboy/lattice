@@ -96,6 +96,7 @@ export function buildUI(serverOrigin: string): string {
 <header>
   <div class="logo"><span class="hex">⬡</span> Lattice Control Plane</div>
   <div class="spacer"></div>
+  <button class="btn-ghost" onclick="copyPrompt()" title="Copy the agent system prompt to give an LLM that drives Lattice">Copy agent prompt</button>
   <input class="token-in" id="token" type="password" placeholder="bearer token (if set)" oninput="saveToken()">
   <div class="pill"><span class="dot" id="dot"></span><span id="status">connecting…</span></div>
 </header>
@@ -183,6 +184,13 @@ async function post(path, body){
   return fetch(API+path,{method:'POST',headers:hdrs(!!body),body:body?JSON.stringify(body):undefined});
 }
 async function get(path){ var r=await fetch(API+path).catch(function(){return null;}); return r&&r.ok? r.json():null; }
+async function copyPrompt(){
+  try {
+    var r = await fetch(API+'/agent-prompt'); var text = await r.text();
+    await navigator.clipboard.writeText(text);
+    toast('Agent prompt copied — paste it into your LLM');
+  } catch(e){ toast('Copy failed — open /agent-prompt to copy manually'); }
+}
 
 // ── Sessions theater ──────────────────────────────────────────────────────────
 function renderSessions(){

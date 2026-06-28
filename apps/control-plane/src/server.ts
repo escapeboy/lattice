@@ -23,6 +23,7 @@ import { ApprovalInbox } from "./inbox.js";
 import { PolicyEditor } from "./policy.js";
 import { OperatorGrantInbox } from "./operator-grants.js";
 import { buildUI } from "./ui.js";
+import { AGENT_PROMPT } from "./agent-prompt.js";
 import { buildHandoffPage } from "./handoff-page.js";
 import { buildReplayPage, buildReplayPageFromRows, traceEventRows, type TraceEventRow } from "./replay-page.js";
 import type { ControlPlaneBackend, PolicyConfig, SessionView } from "./types.js";
@@ -272,6 +273,12 @@ export class ControlPlaneServer {
     // picker instead of free text. Static governance metadata — no PII, open GET.
     if (method === "GET" && path === "/action-catalog") {
       json(res, { catalog: actionCatalog() });
+      return;
+    }
+
+    // The agent system prompt (for the "Copy agent prompt" button). Static, no PII.
+    if (method === "GET" && path === "/agent-prompt") {
+      res.writeHead(200, { "Content-Type": "text/plain; charset=utf-8" }).end(AGENT_PROMPT);
       return;
     }
 
