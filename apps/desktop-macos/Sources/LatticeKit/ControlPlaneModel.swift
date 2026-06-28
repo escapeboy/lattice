@@ -12,6 +12,9 @@ public final class ControlPlaneModel: ObservableObject {
     @Published public private(set) var traces: [TraceSummary] = []
     @Published public private(set) var personas: [Persona] = []
     @Published public private(set) var vault: [VaultEntry] = []
+    @Published public private(set) var chromeProfiles: [ChromeProfile] = []
+    @Published public private(set) var providers: [ProviderInfo] = []
+    @Published public private(set) var actionCatalog: [ActionCatalogEntry] = []
     @Published public private(set) var handoffs: [Handoff] = []
     @Published public var policy: Policy?
     @Published public private(set) var lastError: String?
@@ -62,6 +65,8 @@ public final class ControlPlaneModel: ObservableObject {
             vault = try await v
             handoffs = try await h
             notifier?.sync(handoffs: handoffs)
+            notifier?.sync(approvals: approvals)
+            StackController.shared.pendingApprovals = approvals.count
             if policy == nil { policy = try await client.policy() }
             connected = true
             lastError = nil
@@ -71,26 +76,58 @@ public final class ControlPlaneModel: ObservableObject {
         }
     }
 
+    /// Resolve an approval handoff (login/2FA/confirm wall) in-app: claim for
+    /// this device, then approve/deny. Returns true on success.
+    @discardableResult
+    public func resolveHandoff(_ handoff: Handoff, approved: Bool) async -> Bool {
+        let device = notifier?.deviceId ?? "macos-desktop"
+        do {
+            guard try await client.claimHandoff(handoff.id, deviceId: device) else {
+                lastError = "handoff already claimed elsewhere"; return false
+            }
+            let ok = try await client.resolveHandoff(handoff.id, deviceId: device, approved: approved)
+            await refresh(); lastError = ok ? nil : "handoff resolve rejected"; return ok
+        } catch { lastError = "handoff failed: \(error)"; return false }
+    }
+
+    /// Fulfil an input handoff (e.g. a 2FA code) in-app. The value flows
+    /// Vault→form on the backend — it never passes through the model/agent.
+    @discardableResult
+    public func submitHandoffInput(_ handoff: Handoff, value: String) async -> Bool {
+        let device = notifier?.deviceId ?? "macos-desktop"
+        do {
+            guard try await client.claimHandoff(handoff.id, deviceId: device) else {
+                lastError = "handoff already claimed elsewhere"; return false
+            }
+            let ok = try await client.submitHandoffInput(handoff.id, deviceId: device, value: value)
+            await refresh(); lastError = ok ? nil : "input rejected (expired or claim lost)"; return ok
+        } catch { lastError = "input failed: \(error)"; return false }
+    }
+
     public func reloadPolicy() async {
         do { policy = try await client.policy() } catch { lastError = "\(error)" }
     }
 
-    public func savePolicy(_ p: Policy) async {
+    @discardableResult
+    public func savePolicy(_ p: Policy) async -> Bool {
         do {
             try await client.savePolicy(p)
             policy = p
             lastError = nil
-        } catch { lastError = "save failed: \(error)" }
+            return true
+        } catch { lastError = "save failed: \(error)"; return false }
     }
 
-    public func approve(_ approval: Approval) async {
-        do { try await client.approve(approval.id); await refresh() }
-        catch { lastError = "approve failed: \(error)" }
+    @discardableResult
+    public func approve(_ approval: Approval) async -> Bool {
+        do { try await client.approve(approval.id); await refresh(); lastError = nil; return true }
+        catch { lastError = "approve failed: \(error)"; return false }
     }
 
-    public func deny(_ approval: Approval, reason: String) async {
-        do { try await client.deny(approval.id, reason: reason); await refresh() }
-        catch { lastError = "deny failed: \(error)" }
+    @discardableResult
+    public func deny(_ approval: Approval, reason: String) async -> Bool {
+        do { try await client.deny(approval.id, reason: reason); await refresh(); lastError = nil; return true }
+        catch { lastError = "deny failed: \(error)"; return false }
     }
 
     /// Import the operator's logged-in browser session into a persona (human-
@@ -103,5 +140,50 @@ public final class ControlPlaneModel: ObservableObject {
             lastError = nil
             return n
         } catch { lastError = "import failed: \(error)"; return nil }
+    }
+
+    /// Load the Chrome profiles available for import (best-effort; empty on failure).
+    public func loadChromeProfiles() async {
+        chromeProfiles = (try? await client.chromeProfiles()) ?? []
+    }
+
+    /// Load the known action-type catalog for the Policy picker (best-effort).
+    public func loadActionCatalog() async {
+        if let c = try? await client.actionCatalog(), !c.isEmpty { actionCatalog = c }
+    }
+
+    /// Load credential-provider availability + connection status (best-effort).
+    public func loadProviders() async {
+        providers = (try? await client.providers()) ?? []
+    }
+
+    /// Connect a credential provider. Returns logins exposed (-1 if not
+    /// enumerable), or nil on failure.
+    @discardableResult
+    public func connectProvider(id: String, scope: String?, session: String?) async -> Int? {
+        do {
+            let n = try await client.connectProvider(id: id, scope: scope, session: session)
+            await loadProviders()
+            lastError = nil
+            return n
+        } catch { lastError = "\(error)"; return nil }
+    }
+
+    public func disconnectProvider(id: String) async {
+        do {
+            try await client.disconnectProvider(id: id)
+            await loadProviders()
+            lastError = nil
+        } catch { lastError = "\(error)" }
+    }
+
+    /// Store a credential in the local encrypted vault. Returns true on success.
+    public func storeVaultCredential(label: String, origin: String, username: String, password: String) async -> Bool {
+        do {
+            try await client.storeVaultCredential(label: label, origin: origin, username: username, password: password)
+            await refresh()
+            lastError = nil
+            return true
+        } catch { lastError = "\(error)"; return false }
     }
 }

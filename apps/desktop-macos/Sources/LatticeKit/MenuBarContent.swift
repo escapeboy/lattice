@@ -4,10 +4,14 @@ import SwiftUI
 /// supervisor (D2). Session list / theater / approvals land in D3–D4.
 public struct MenuBarContent: View {
     @ObservedObject private var stack: StackController
-    @Environment(\.openWindow) private var openWindow
+    /// Opens the control-plane window. Injected by the AppKit status-bar
+    /// controller (the popover is hosted outside the SwiftUI scene graph, so
+    /// `@Environment(\.openWindow)` isn't available here).
+    private let onOpenControlPlane: () -> Void
 
-    public init(stack: StackController) {
+    public init(stack: StackController, onOpenControlPlane: @escaping () -> Void = {}) {
         self.stack = stack
+        self.onOpenControlPlane = onOpenControlPlane
     }
 
     public var body: some View {
@@ -24,6 +28,7 @@ public struct MenuBarContent: View {
 
             HStack(spacing: 6) {
                 Circle().fill(statusColor).frame(width: 8, height: 8)
+                    .accessibilityHidden(true) // statusText conveys the same state
                 Text(statusText).font(.caption)
             }
 
@@ -32,11 +37,21 @@ public struct MenuBarContent: View {
                     .font(.caption).foregroundStyle(.orange)
             }
 
+            if stack.needsAttention > 0 {
+                Button {
+                    onOpenControlPlane()
+                } label: {
+                    Label("\(stack.needsAttention) item\(stack.needsAttention == 1 ? "" : "s") need your attention",
+                          systemImage: "exclamationmark.shield.fill")
+                        .font(.caption).foregroundStyle(.orange)
+                }
+                .buttonStyle(.plain)
+            }
+
             Divider()
 
             Button(stack.firstRunNeeded ? "Set up Lattice…" : "Open Control Plane…") {
-                openWindow(id: "control-plane")
-                NSApplication.shared.activate(ignoringOtherApps: true)
+                onOpenControlPlane()
             }
             .disabled(!isRunning && !stack.firstRunNeeded)
 
@@ -79,8 +94,11 @@ public struct MenuBarContent: View {
 }
 
 public extension StackController {
-    /// SF Symbol for the menubar item, tinted by liveness.
+    /// SF Symbol for the menubar item, tinted by liveness. A pending approval
+    /// raises an attention badge so a blocked agent action is visible even when
+    /// the window is closed.
     var menubarSymbol: String {
+        if needsAttention > 0 { return "exclamationmark.shield.fill" }
         switch state {
         case .running: return "shield.lefthalf.filled"
         case .failed: return "shield.slash"

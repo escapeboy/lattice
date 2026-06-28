@@ -22,6 +22,14 @@ public final class StackController: ObservableObject {
     @Published public private(set) var client: MCPClient?
     /// Whether the first-run egress allowlist has been configured (proxy ON).
     @Published public private(set) var egressConfigured: Bool = DesktopEgress.isConfigured
+    /// Consequential actions blocked awaiting the operator's approval. Drives the
+    /// menubar attention indicator so a blocked agent isn't hidden in a tab.
+    @Published public internal(set) var pendingApprovals: Int = 0
+    /// Human handoffs the agent raised at a wall (login / 2FA / confirm) awaiting
+    /// the operator. Also drives the menubar attention indicator.
+    @Published public internal(set) var pendingHandoffs: Int = 0
+    /// Total things needing the operator (approvals + handoffs).
+    public var needsAttention: Int { pendingApprovals + pendingHandoffs }
 
     public let gatewayPort: Int
     public let controlPlanePort: Int
@@ -73,11 +81,45 @@ public final class StackController: ObservableObject {
             let c = MCPClient(endpoint: mcpURL, token: mcpToken)
             Task { try? await c.connect() }
             client = c
+            startAlertPoll()
         } else if case .running = s {
             // already connected
         } else {
             client = nil
+            stopAlertPoll()
         }
+    }
+
+    // Always-on alert poll: the full control-plane model only polls while its
+    // window is OPEN, so a blocked approval would sit silent in a menubar-only
+    // app. This lightweight poll runs for the whole running lifetime, feeding the
+    // notifier (native banner) and the menubar badge regardless of window state.
+    private var alertPollTask: Task<Void, Never>?
+
+    private func startAlertPoll() {
+        guard alertPollTask == nil else { return }
+        let client = ControlPlaneClient(baseURL: controlPlaneURL, token: cpToken)
+        handoffNotifier.attach(client: client)
+        alertPollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                if let approvals = try? await client.approvals() {
+                    self?.handoffNotifier.sync(approvals: approvals)
+                    self?.pendingApprovals = approvals.count
+                }
+                if let handoffs = try? await client.handoffs() {
+                    self?.handoffNotifier.sync(handoffs: handoffs)
+                    self?.pendingHandoffs = handoffs.filter { $0.status == "pending" }.count
+                }
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+            }
+        }
+    }
+
+    private func stopAlertPoll() {
+        alertPollTask?.cancel()
+        alertPollTask = nil
+        pendingApprovals = 0
+        pendingHandoffs = 0
     }
 
     /// Desktop egress is OFF by default, so first-run never blocks startup. The

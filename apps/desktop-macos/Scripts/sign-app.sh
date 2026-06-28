@@ -3,12 +3,16 @@
 # Sign build/Lattice.app and every embedded executable with the hardened runtime
 # + JIT entitlements, inside-out (D7).
 #
-#   Scripts/sign-app.sh                  # ad-hoc dev signature (default)
-#   IDENTITY="Developer ID Application: NAME (TEAMID)" Scripts/sign-app.sh
+#   Scripts/sign-app.sh                  # auto: Developer ID if available, else ad-hoc
+#   IDENTITY="Developer ID Application: NAME (TEAMID)" Scripts/sign-app.sh  # explicit
+#   IDENTITY="-" Scripts/sign-app.sh     # force ad-hoc
 #
-# The agent NEVER handles Developer ID certificates — pass IDENTITY yourself when
-# you're ready to produce a notarizable build. Ad-hoc ("-") runs locally but is
-# NOT notarizable.
+# Default picks a stable "Developer ID Application" identity from the keychain
+# when present. WHY: macOS ties Privacy/TCC permissions (App Management,
+# Automation…) to the code signature. Ad-hoc ("-") changes the cdhash on every
+# rebuild, so macOS treats each build as a NEW app and re-prompts for permission
+# every launch. A Developer ID identity is stable across rebuilds → grant once.
+# Falls back to ad-hoc only when no Developer ID cert is in the keychain.
 #
 # Chromium is NOT bundled — Playwright fetches it to ~/Library/Caches/ms-playwright
 # on first run (outside the .app), so it isn't part of this signature.
@@ -18,7 +22,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 APP="build/Lattice.app"
 ENT="Signing/Lattice.entitlements"
-IDENTITY="${IDENTITY:--}"
+IDENTITY="${IDENTITY:-}"
+if [ -z "$IDENTITY" ]; then
+  IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
+    | grep -m1 'Developer ID Application' | sed -E 's/.*"(.*)".*/\1/')"
+  [ -z "$IDENTITY" ] && IDENTITY="-"
+fi
 
 [ -d "$APP" ] || { echo "ERROR: $APP not found — run make-app.sh first." >&2; exit 1; }
 

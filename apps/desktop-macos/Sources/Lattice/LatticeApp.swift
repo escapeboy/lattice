@@ -9,18 +9,13 @@ import LatticeKit
 @main
 struct LatticeApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
-    @StateObject private var stack = StackController.shared
 
     var body: some Scene {
-        MenuBarExtra("Lattice", systemImage: stack.menubarSymbol) {
-            MenuBarContent(stack: stack)
-        }
-        .menuBarExtraStyle(.window)
-
-        Window("Lattice Control Plane", id: "control-plane") {
-            ControlPlaneRoot(stack: stack)
-        }
-        .defaultSize(width: 860, height: 580)
+        // The menubar item and the control-plane window are managed in AppKit
+        // (StatusBarController) so we can distinguish LEFT-click (open window)
+        // from RIGHT-click (popover) — SwiftUI's MenuBarExtra can't. This no-op
+        // scene just satisfies the `App` requirement; it never shows (LSUIElement).
+        Settings { EmptyView() }
     }
 }
 
@@ -31,10 +26,13 @@ struct LatticeApp: App {
 /// is idempotent, so overlapping paths are safe.
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var signalSources: [DispatchSourceSignal] = []
+    private var statusBar: StatusBarController?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         installSignalTeardown(for: [SIGTERM, SIGINT])
         StackController.shared.handoffNotifier.configure()
+        // AppKit menubar item: left-click opens the window, right-click the menu.
+        statusBar = StatusBarController(stack: .shared)
         StackController.shared.startStack()
     }
 

@@ -23,13 +23,15 @@ public struct TheaterView: View {
                 }.tag(s.sessionId)
             }
             .frame(minWidth: 220)
-            .overlay { if model.sessions.isEmpty { ContentUnavailableMessage("No active sessions") } }
+            .overlay { if model.sessions.isEmpty {
+                ContentUnavailableMessage("No active sessions", systemImage: "rectangle.3.group")
+            } }
 
             if let sid = selected {
                 LiveSessionView(sessionId: sid, mcpClient: mcpClient)
                     .frame(minWidth: 240)
             } else {
-                ContentUnavailableMessage("Select a session to watch it live")
+                ContentUnavailableMessage("Select a session to watch it live", systemImage: "cursorarrow.rays")
                     .frame(minWidth: 240)
             }
         }
@@ -50,9 +52,10 @@ struct LiveSessionView: View {
                 Text("Live perceive").font(.headline)
                 Spacer()
                 Circle().fill(streaming ? .green : .gray).frame(width: 8, height: 8)
+                    .accessibilityLabel(streaming ? "Live" : "Not streaming")
             }
             if deltas.isEmpty {
-                Text(streaming ? "Subscribed — waiting for page changes…" : "Connecting…")
+                Text(streaming ? "Live — waiting for the next page change…" : "Reading current page…")
                     .font(.caption).foregroundStyle(.secondary)
             }
             ScrollView {
@@ -71,11 +74,20 @@ struct LiveSessionView: View {
         guard let client = mcpClient else { return }
         deltas = []
         streaming = false
+        // Show the CURRENT page state immediately — perceive_subscribe only pushes
+        // deltas when the page changes, so without this the pane sits blank on a
+        // static page. Taking the snapshot first also seeds the server baseline,
+        // so the first streamed delta is a real incremental change, not the whole
+        // page reported as "+N added".
+        if let snap = try? await client.perceiveSnapshot(sessionId: sessionId) {
+            let title = snap.title.isEmpty ? "" : " · \(snap.title)"
+            deltas.insert("▶ \(snap.url.isEmpty ? "about:blank" : snap.url) · \(snap.nodeCount) nodes\(title)", at: 0)
+        }
         do {
-            _ = try await client.subscribe(sessionId: sessionId, intervalMs: 1000)
+            _ = try await client.subscribe(sessionId: sessionId, intervalMs: 500)
             streaming = true
         } catch {
-            deltas = ["subscribe failed: \(error)"]
+            deltas.insert("subscribe failed: \(error)", at: 0)
             return
         }
         let stream = await client.perceiveStream()
@@ -88,12 +100,3 @@ struct LiveSessionView: View {
     }
 }
 
-struct ContentUnavailableMessage: View {
-    let text: String
-    init(_ text: String) { self.text = text }
-    var body: some View {
-        Text(text)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}

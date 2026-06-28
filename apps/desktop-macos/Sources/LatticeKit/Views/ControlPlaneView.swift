@@ -89,6 +89,17 @@ public struct ControlPlaneView: View {
         } detail: {
             detail.frame(minWidth: 460, minHeight: 360)
         }
+        .background(sectionShortcuts)
+    }
+
+    /// ⌘1–5 jump between sections. Zero-size buttons keep the shortcuts live
+    /// without occupying layout (the app has no menu bar to host them).
+    private var sectionShortcuts: some View {
+        ForEach(Array(ControlPlaneSection.allCases.enumerated()), id: \.element) { idx, s in
+            Button("") { section = s }
+                .keyboardShortcut(KeyEquivalent(Character("\(idx + 1)")), modifiers: .command)
+                .frame(width: 0, height: 0).opacity(0)
+        }
     }
 
     @ViewBuilder private var detail: some View {
@@ -104,6 +115,7 @@ public struct ControlPlaneView: View {
     private var statusBar: some View {
         HStack(spacing: 6) {
             Circle().fill(model.connected ? .green : .orange).frame(width: 7, height: 7)
+                .accessibilityHidden(true) // the adjacent text already states the status
             Text(model.connected ? "Connected" : "Reconnecting…")
                 .font(.caption2).foregroundStyle(.secondary)
             Spacer()

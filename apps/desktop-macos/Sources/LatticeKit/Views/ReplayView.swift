@@ -13,7 +13,7 @@ public struct ReplayView: View {
         HSplitView {
             Group {
                 if model.traces.isEmpty {
-                    ContentUnavailableMessage("No recorded sessions yet")
+                    ContentUnavailableMessage("No recorded sessions yet", systemImage: "clock.arrow.circlepath")
                 } else {
                     Table(model.traces, selection: $selected) {
                         TableColumn("Session") { t in
@@ -33,7 +33,7 @@ public struct ReplayView: View {
             if let id = selected {
                 TraceTimelineView(traceId: id, model: model).frame(minWidth: 280)
             } else {
-                ContentUnavailableMessage("Select a session to see its timeline").frame(minWidth: 280)
+                ContentUnavailableMessage("Select a session to see its timeline", systemImage: "cursorarrow.rays").frame(minWidth: 280)
             }
         }
         .navigationTitle("Replay")
@@ -57,7 +57,7 @@ struct TraceTimelineView: View {
             if loading {
                 ProgressView().frame(maxWidth: .infinity)
             } else if rows.isEmpty {
-                ContentUnavailableMessage("No events")
+                ContentUnavailableMessage("No events", systemImage: "list.bullet")
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 3) {
