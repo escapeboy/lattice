@@ -127,13 +127,12 @@ public final class StackController: ObservableObject {
         pendingHandoffs = 0
     }
 
-    /// Desktop egress is OFF by default, so first-run never blocks startup. The
-    /// app-level proxy gates HTTP only and BREAKS HTTPS navigation: Chromium
-    /// routes HTTPS through the proxy, which can't tunnel the CONNECT, so every
-    /// navigation fails with net::ERR_EMPTY_RESPONSE. Forcing the egress setup
-    /// therefore shipped a browser that can't load HTTPS. Re-enable the guided
-    /// first-run when app-level HTTPS gating lands (plans/https-egress-roadmap).
-    public var firstRunNeeded: Bool { false }
+    // Desktop egress is OFF by default (no guided first-run): the app-level proxy
+    // gates HTTP only and BREAKS HTTPS navigation — Chromium routes HTTPS through
+    // the proxy, which can't tunnel the CONNECT, so every navigation fails with
+    // net::ERR_EMPTY_RESPONSE. Forcing the egress setup therefore shipped a
+    // browser that can't load HTTPS. Re-enable a guided setup when app-level HTTPS
+    // gating lands (plans/https-egress-roadmap).
 
     /// Persist an allowlist (kept for the future HTTPS-gating work) and restart.
     /// NOTE: `environment()` does not wire this to the running stack today —
@@ -192,6 +191,13 @@ public final class StackController: ObservableObject {
             if !hadKey { try? FileManager.default.removeItem(at: vaultPath) }
             env["LATTICE_VAULT_KEY"] = vaultKey
             env["LATTICE_VAULT_PATH"] = vaultPath.path
+        }
+        // Handoff HMAC signing key — stable across runs (Keychain-backed) so a
+        // handoff signed before a restart stays verifiable after it. Without this
+        // the backend mints a random per-process key, silently breaking
+        // verification (and the anti-phishing guarantee) for any in-flight handoff.
+        if let handoffKey = KeychainStore.getOrCreateHexKey("handoff-key") {
+            env["LATTICE_HANDOFF_KEY"] = handoffKey
         }
         // Desktop egress (D6): currently a no-op — `environment()` returns empty
         // because the app proxy breaks HTTPS (see DesktopEgress). Merged anyway so

@@ -503,14 +503,15 @@ describe("ControlPlaneServer — HTTP API", () => {
     expect(missing.status).toBe(404);
   });
 
-  it("POST /intent returns queued=true", async () => {
+  it("POST /intent records the intent but reports it is NOT dispatched (honest)", async () => {
     const r = await fetch(baseUrl + "/intent", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ intent: "fill the login form" }),
     });
-    const data = await r.json() as { queued: boolean; intent: string };
-    expect(data.queued).toBe(true);
+    const data = await r.json() as { logged: boolean; dispatched: boolean; intent: string };
+    expect(data.logged).toBe(true);
+    expect(data.dispatched).toBe(false);
     expect(data.intent).toBe("fill the login form");
   });
 });

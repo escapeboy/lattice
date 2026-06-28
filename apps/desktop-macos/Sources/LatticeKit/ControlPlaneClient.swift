@@ -237,13 +237,18 @@ public struct ControlPlaneClient: Sendable {
         return try JSONDecoder().decode([ChromeProfile].self, from: sub)
     }
 
-    public func importPersona(personaId: String, profile: String, origins: [String]) async throws -> Int {
+    /// Returns the imported cookie count plus an optional note — e.g. the honest
+    /// warning that the default (agent-browser) engine does NOT restore the
+    /// session, so the persona won't be auto-logged-in.
+    public func importPersona(personaId: String, profile: String, origins: [String]) async throws -> (imported: Int, note: String?) {
         let body = try JSONSerialization.data(withJSONObject: [
             "personaId": personaId, "profile": profile, "origins": origins,
         ])
         let (data, _) = try await send("POST", "/persona-import", body: body)
         let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-        return (obj?["imported"] as? Int) ?? 0
+        let restored = (obj?["restored"] as? Bool) ?? true
+        let note = restored ? nil : (obj?["note"] as? String)
+        return ((obj?["imported"] as? Int) ?? 0, note)
     }
 
     // MARK: plumbing

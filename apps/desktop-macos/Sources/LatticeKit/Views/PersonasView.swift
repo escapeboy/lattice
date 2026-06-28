@@ -86,13 +86,15 @@ public struct PersonasView: View {
                             }
                             importing = true; importResult = nil
                             Task {
-                                let n = await model.importPersona(
+                                let r = await model.importPersona(
                                     personaId: importPersonaId,
                                     profile: importProfile.isEmpty ? "Default" : importProfile,
                                     origins: origins)
                                 importing = false
-                                importResult = n.map { "Imported \($0) cookie(s) into “\(importPersonaId)”." }
-                                    ?? (model.lastError ?? "Import failed.")
+                                importResult = r.map { res in
+                                    let base = "Imported \(res.imported) cookie(s) into “\(importPersonaId)”."
+                                    return res.note.map { "\(base)\n⚠️ \($0)" } ?? base
+                                } ?? (model.lastError ?? "Import failed.")
                             }
                         } label: { Label("Import from Chrome", systemImage: "square.and.arrow.down") }
                         .disabled(importing || importPersonaId.isEmpty || importOrigins.isEmpty)

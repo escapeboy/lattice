@@ -103,8 +103,8 @@ export function buildUI(serverOrigin: string): string {
 <main>
   <div id="minted"></div>
   <div class="intent">
-    <input id="intent-input" placeholder="Dispatch an intent — e.g. &quot;log into the staging dashboard and export the weekly report&quot;" onkeydown="if(event.key==='Enter')sendIntent()">
-    <button class="btn-pri" onclick="sendIntent()">Dispatch</button>
+    <input id="intent-input" placeholder="Record an intent (autonomous dispatch not yet wired) — e.g. &quot;log into the staging dashboard and export the weekly report&quot;" onkeydown="if(event.key==='Enter')sendIntent()">
+    <button class="btn-pri" onclick="sendIntent()">Record</button>
   </div>
 
   <div class="grid">
@@ -324,7 +324,7 @@ async function loadTraces(){
 
 async function sendIntent(){
   var i=document.getElementById('intent-input'); var v=i.value.trim(); if(!v) return;
-  var r=await post('/intent',{intent:v}); if(r&&r.ok){ i.value=''; toast('Intent dispatched'); }
+  var r=await post('/intent',{intent:v}); if(r&&r.ok){ i.value=''; toast('Intent recorded (dispatch not yet wired)'); }
 }
 
 // ── Loaders + SSE ─────────────────────────────────────────────────────────────

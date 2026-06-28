@@ -347,7 +347,9 @@ export class ControlPlaneServer {
       if (!personaId || !origins || !origins.length) { res.writeHead(400).end("personaId and origins required"); return; }
       try {
         const result = await this.backend.importPersona(personaId, profile ?? "Default", origins);
-        json(res, { ...result, note: "credentials imported into the persona vault — values never exposed" });
+        // result.note (the honest "not restored on this engine" warning, when
+        // present) must win over the generic note — so spread result LAST.
+        json(res, { note: "credentials imported into the persona vault — values never exposed", ...result });
       } catch (e) {
         res.writeHead(500, { "Content-Type": "application/json" }).end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
       }
@@ -454,9 +456,16 @@ export class ControlPlaneServer {
 
     if (method === "POST" && path === "/intent") {
       const body = await readBody(req);
-      // P0: log intent; S9 will wire it to an agent
       const { intent } = (body ? JSON.parse(body) : {}) as { intent?: string };
-      json(res, { queued: true, intent: intent ?? "" });
+      // Autonomous intent dispatch is NOT wired yet (S9). Record it so it isn't
+      // silently dropped, and report honestly — never claim it was dispatched.
+      if (intent) console.error(`[intent] recorded (not dispatched): ${intent}`);
+      json(res, {
+        logged: true,
+        dispatched: false,
+        intent: intent ?? "",
+        note: "intent recorded; autonomous dispatch is not yet wired (S9)",
+      });
       return;
     }
 

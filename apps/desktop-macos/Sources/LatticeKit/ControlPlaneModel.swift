@@ -133,12 +133,14 @@ public final class ControlPlaneModel: ObservableObject {
     /// Import the operator's logged-in browser session into a persona (human-
     /// initiated). Returns the number of cookies imported, or nil on failure.
     @discardableResult
-    public func importPersona(personaId: String, profile: String, origins: [String]) async -> Int? {
+    /// Returns the imported count plus an optional honest note (e.g. the engine
+    /// won't restore the session). `nil` on failure.
+    public func importPersona(personaId: String, profile: String, origins: [String]) async -> (imported: Int, note: String?)? {
         do {
-            let n = try await client.importPersona(personaId: personaId, profile: profile, origins: origins)
+            let r = try await client.importPersona(personaId: personaId, profile: profile, origins: origins)
             await refresh()
             lastError = nil
-            return n
+            return r
         } catch { lastError = "import failed: \(error)"; return nil }
     }
 

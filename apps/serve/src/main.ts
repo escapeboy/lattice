@@ -6,12 +6,19 @@
  *   LATTICE_PORT            gateway MCP port (default 8765)
  *   LATTICE_HOST            bind host (default 0.0.0.0)
  *   CONTROL_PLANE_PORT      control-plane UI port (default 7900)
- *   CHROME_EXECUTABLE       Chromium (else auto-detected)
+ *   LATTICE_ENGINE          "agent-browser" (default, governed) | "cdp" (legacy, UNGOVERNED)
+ *   CHROME_EXECUTABLE       Chromium for the cdp engine (else auto-detected)
+ *   LATTICE_HEADED / LATTICE_DEVICE   agent-browser: headed mode / device profile
  *   LATTICE_ALLOWED_ORIGINS / LATTICE_EGRESS_ALLOWLIST / LATTICE_PROHIBITED
- *   LATTICE_NTFY_BASE / LATTICE_HANDOFF_KEY   handoff push + signing
+ *   LATTICE_EGRESS_LEARN    "1" = ask-to-allow egress (only mode that builds egressPolicy)
+ *   LATTICE_NTFY_BASE / LATTICE_HANDOFF_KEY   handoff push + HMAC signing key
+ *                          (unset → random per-process key: signatures break on restart)
  *   LATTICE_VAULT_KEY / LATTICE_VAULT_PATH    vault encryption + persistence
  *   LATTICE_PII_FULL_ORIGINS  origins to log in full (default: all redacted)
- *   LATTICE_RATE_LIMIT_RPS    per-origin navigation rate (default 4; 0 disables)
+ *   LATTICE_RATE_LIMIT_RPS    per-origin navigation rate (default 4; 0 disables; build-on only)
+ *   LATTICE_TRACE_DIR       trace + replay-archive dir (default ./traces)
+ *   LATTICE_MCP_TOKEN / LATTICE_CP_TOKEN   Bearer tokens (random+logged if unset)
+ *   LATTICE_PARENT_PID      parent-death watchdog target (≤1 → disabled)
  */
 
 import { mkdir, writeFile } from "node:fs/promises";

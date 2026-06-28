@@ -32,11 +32,6 @@ public struct MenuBarContent: View {
                 Text(statusText).font(.caption)
             }
 
-            if stack.firstRunNeeded {
-                Label("First-run: set up the egress firewall", systemImage: "exclamationmark.triangle")
-                    .font(.caption).foregroundStyle(.orange)
-            }
-
             if stack.needsAttention > 0 {
                 Button {
                     onOpenControlPlane()
@@ -50,10 +45,10 @@ public struct MenuBarContent: View {
 
             Divider()
 
-            Button(stack.firstRunNeeded ? "Set up Lattice…" : "Open Control Plane…") {
+            Button("Open Control Plane…") {
                 onOpenControlPlane()
             }
-            .disabled(!isRunning && !stack.firstRunNeeded)
+            .disabled(!isRunning)
 
             Button("Check for Updates…") {
                 UpdaterController.shared.checkForUpdates()

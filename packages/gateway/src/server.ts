@@ -25,7 +25,7 @@ import type { FidelityTier, InteractionGraph } from "@lattice/perception";
 import { compactNodes, compactDelta } from "@lattice/perception";
 import type { GrantScope, OperatorRequest, SecurityKernel } from "@lattice/kernel";
 import { SessionRegistry } from "./sessions.js";
-import type { SessionProvider } from "./sessions.js";
+import type { SessionProvider, GatewaySession } from "./sessions.js";
 import { Vault } from "./vault.js";
 import { OperatorStore, type DeviceChannel, type PolicySnapshot } from "./operator.js";
 import { HandoffManager, NullTransport, type HandoffType, type NotificationTransport } from "./handoff.js";
@@ -506,6 +506,17 @@ export class GatewayServer {
     this.actionCounts.set(sessionId, (this.actionCounts.get(sessionId) ?? 0) + 1);
   }
 
+  /** Best-known current URL for a session. On the build-on path the context's
+   *  `currentUrl()` is "" — navigation flows through the action adapter, not the
+   *  context shim, so its cache never updates. Prefer the last URL observed from
+   *  navigate/act (the same source Theater uses). SECURITY-RELEVANT: vault
+   *  autofill origin-binding (A5) and the vault_list origin filter depend on a
+   *  real page origin here; the stale "" made autofill always mis-fire on
+   *  build-on (the shipped desktop path). */
+  private liveUrl(session: GatewaySession): string {
+    return this.lastUrls.get(session.id) || session.context.currentUrl();
+  }
+
   /** A fresh MCP Server wired to the shared gateway state (handlers dispatch
    *  into this.* — so every per-session server shares one core). */
   private buildServer(): Server {
@@ -842,7 +853,7 @@ export class GatewayServer {
       // ── capability.* ───────────────────────────────────────────────────────
       case "capability_check": {
         const session = this.getSession(a["sessionId"] as string);
-        const url = session.context.currentUrl();
+        const url = this.liveUrl(session);
         // Serve a fresh cached probe without re-touching the page.
         const cached = this.capabilities.get(url);
         if (cached) {
@@ -887,7 +898,7 @@ export class GatewayServer {
         const explicitOrigin = a["origin"] as string | undefined;
         const sid = a["sessionId"] as string | undefined;
         const origin = explicitOrigin
-          ?? (sid ? originOf(this.getSession(sid).context.currentUrl()) ?? undefined : undefined);
+          ?? (sid ? originOf(this.liveUrl(this.getSession(sid))) ?? undefined : undefined);
         if (origin) {
           return ok({ credentials: this.vault.findByOrigin(origin), matchedOrigin: origin });
         }
@@ -915,7 +926,7 @@ export class GatewayServer {
         // origin — never onto a look-alike / attacker page the agent was lured
         // to. Without this a stolen-credential exfil is one navigation away.
         const credOrigin = this.vault.getOrigin(credId);
-        const pageOrigin = originOf(session.context.currentUrl());
+        const pageOrigin = originOf(this.liveUrl(session));
         if (credOrigin && originOf(credOrigin) !== pageOrigin) {
           return ok({
             status: "blocked",
@@ -1051,7 +1062,7 @@ export class GatewayServer {
           handoffId: req.id,
           status: req.status,
           type: req.type,
-          notifiedDevices: this.operatorStore.listDevices().length,
+          notifiedDevices: this.operatorStore.verifiedDevices().length,
           note: type === "input"
             ? "input value will flow Vault→form via the human channel — never request it through the agent"
             : "awaiting human approve/deny — poll handoff_status",
@@ -1156,6 +1167,7 @@ export class GatewayServer {
           ...(patch.allowedOrigins ? { allowedOrigins: patch.allowedOrigins } : {}),
           ...(patch.egressAllowlist ? { egressAllowlist: patch.egressAllowlist } : {}),
           prohibitedActions: applied.prohibitedActions,
+          consequentialActions: applied.requireGrant,
         });
         return ok({ status: "applied", policy: applied });
       }

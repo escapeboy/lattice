@@ -96,9 +96,15 @@ export class SecurityKernelImpl implements SecurityKernel {
       if (lower === r || lower.startsWith(r)) return "read";
     }
 
-    // Consequential
+    // Consequential — built-in defaults plus any operator-tightened types. The
+    // operator `requireGrant` list flows here via applyPolicy, so editing it
+    // actually gates classification (not just a UI snapshot).
     for (const c of CONSEQUENTIAL_DEFAULTS) {
       if (lower === c || lower.startsWith(c)) return "consequential";
+    }
+    for (const c of this.config.consequentialActions ?? []) {
+      const cl = c.toLowerCase();
+      if (lower === cl || lower.startsWith(cl)) return "consequential";
     }
 
     // Benign
@@ -267,9 +273,13 @@ export class SecurityKernelImpl implements SecurityKernel {
    * primitives are unioned back in unconditionally, so the live prohibited set
    * can never drop below the floor even if a caller bypassed the gate.
    */
-  applyPolicy(patch: { allowedOrigins?: string[]; egressAllowlist?: string[]; prohibitedActions?: string[] }): void {
+  applyPolicy(patch: { allowedOrigins?: string[]; egressAllowlist?: string[]; prohibitedActions?: string[]; consequentialActions?: string[] }): void {
     if (patch.allowedOrigins) replaceInPlace(this.config.allowedOrigins, patch.allowedOrigins);
     if (patch.egressAllowlist) replaceInPlace(this.config.egressAllowlist, patch.egressAllowlist);
+    if (patch.consequentialActions) {
+      this.config.consequentialActions ??= [];
+      replaceInPlace(this.config.consequentialActions, patch.consequentialActions);
+    }
     const nextProhibited = patch.prohibitedActions ?? this.config.prohibitedActions;
     const floored = new Set([...nextProhibited, ...CONSTITUTIONAL_FLOOR.prohibitedPrimitives]);
     replaceInPlace(this.config.prohibitedActions, Array.from(floored));

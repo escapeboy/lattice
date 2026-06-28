@@ -9,3 +9,5 @@
 traces/
 # Throwaway smoke-test scratch — not for the repo.
 smoke-findings.md
+# Local agent instructions (references private Svod memory) — keep out of the public repo.
+CLAUDE.md

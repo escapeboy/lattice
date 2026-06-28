@@ -117,9 +117,16 @@ export class BuildOnSessionRegistry implements SessionProvider {
   }
 
   /**
-   * Store imported persona cookies (human-initiated, prohibited tier). agent-
-   * browser restores them via its own profile/state on a persistent session; the
-   * values never reach the model. Merges into any existing import.
+   * Store imported persona cookies (human-initiated, prohibited tier). Merges
+   * into any existing import; values never reach the model.
+   *
+   * IMPORTANT: on the build-on (agent-browser) engine these cookies are NOT
+   * restored into a session — `create()` does not inject them, and the
+   * cookie/state-injection flags (`--state`/`--session-name`/`--profile`) are
+   * FIREWALLED by design (firewall.ts) as persona-import/credential vectors. So
+   * on this engine the import is stored-but-inert; auto-login from a restored
+   * session works only on the CDP `SessionRegistry`. The serve adapter reports
+   * `restored: false` for the build-on engine so the operator isn't misled.
    */
   importPersona(personaId: string, cookies: SnapshotData["cookies"]): number {
     const prev = this.personaCookies.get(personaId) ?? [];

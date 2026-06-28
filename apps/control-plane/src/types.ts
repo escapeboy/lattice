@@ -75,7 +75,7 @@ export interface ControlPlaneBackend {
   /** Set the token budget from the UI. */
   setBudget(limitTokens: number): void;
   /** Human-initiated persona import from a real browser profile (credential-bearing). */
-  importPersona(personaId: string, profile: string, origins: string[]): Promise<{ imported: number; origins: string[] }>;
+  importPersona(personaId: string, profile: string, origins: string[]): Promise<{ imported: number; origins: string[]; restored?: boolean; note?: string }>;
   /** On-disk Chrome profiles available to import from (dir name + display name). */
   listChromeProfiles(): Array<{ dir: string; name: string }>;
   /** Store a credential directly in the local encrypted vault (operator-entered). */

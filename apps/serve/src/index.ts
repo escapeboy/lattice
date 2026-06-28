@@ -137,7 +137,16 @@ export function createLatticeCore(config: LatticeServeConfig): LatticeCore {
       // origin, and inject into the persona — values never leave this boundary.
       const cookies = importChromeCookies(profile, origins);
       const imported = gateway.importPersonaCookies(personaId, origins, cookies);
-      return Promise.resolve({ imported, origins });
+      // The build-on (agent-browser) engine does NOT restore imported cookies
+      // (state injection is firewalled), so be honest: the import is stored but
+      // won't auto-log-in on the default desktop engine. CDP restores them.
+      const restored = config.engineKind !== "agent-browser";
+      return Promise.resolve({
+        imported,
+        origins,
+        restored,
+        ...(restored ? {} : { note: "cookies stored, but this engine does not restore them — the persona will NOT be auto-logged-in (agent-browser state injection is firewalled). Session restore works on the CDP engine." }),
+      });
     },
     listChromeProfiles: () => listChromeProfiles(),
     storeVaultCredential: (label, origin, username, password) =>

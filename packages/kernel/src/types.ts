@@ -92,6 +92,10 @@ export interface KernelConfig {
   egressAllowlist: string[];
   /** Action types that are always prohibited regardless of other config. */
   prohibitedActions: string[];
+  /** Operator-tightened action types that require a human grant (on top of the
+   *  built-in consequential defaults). Populated from the policy `requireGrant`
+   *  list so editing it actually changes classification. */
+  consequentialActions?: string[];
   /** Callback invoked when a consequential action requires human grant. */
   grantHandler?: (req: CapabilityRequest) => Promise<GrantDecision>;
 }
@@ -113,7 +117,7 @@ export interface SecurityKernel {
   /** Register every string leaf of a value as tainted (page-origin observation). */
   taintTree(value: unknown): void;
   /** Apply an approved policy patch to live enforcement; floor re-asserted. */
-  applyPolicy(patch: { allowedOrigins?: string[]; egressAllowlist?: string[]; prohibitedActions?: string[] }): void;
+  applyPolicy(patch: { allowedOrigins?: string[]; egressAllowlist?: string[]; prohibitedActions?: string[]; consequentialActions?: string[] }): void;
   /** Classify an operator-surface tool into its privilege tier. */
   operatorTier(tool: string): OperatorTier;
   /**
