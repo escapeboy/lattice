@@ -21,6 +21,7 @@
 
 import type { NodeId } from "@lattice/perception";
 import type { ActionCommand } from "@lattice/action";
+import { normalizeLabel, labelMatches } from "@lattice/action";
 import type { Recipe, RecipeStep, SemanticLocator } from "./types.js";
 
 /** A live IG node the runner can resolve a locator against (id + role + label). */
@@ -85,14 +86,24 @@ const ELEMENT_ACTIONS: ReadonlySet<RecipeStep["action"]> = new Set([
 /**
  * Resolve a semantic locator against the live nodes. Matches on the accessible
  * label (the stable semantic anchor); if several nodes share a label, the role
- * disambiguates. No fuzzy/nearest guess — a genuine mismatch returns undefined so
- * the caller takes the documented fallback rather than acting on the wrong element.
+ * disambiguates. Label matching is NORMALISED (case-fold + decorative-glyph strip)
+ * and tolerates a node carrying extra trailing content ("Get Started →" matches
+ * "Get Started") — perception sees the control, so we let the agent address it by
+ * the human name. Still NO fuzzy/nearest guess: exact-normalised wins, the prefix
+ * fallback is tried only if nothing matched exactly, and a genuine mismatch returns
+ * undefined so the caller takes the documented fallback rather than the wrong node.
  */
 export function resolveLocator(loc: SemanticLocator, nodes: ReadonlyArray<LocatableNode>): NodeId | undefined {
-  const byLabel = nodes.filter((n) => n.label === loc.label);
-  if (byLabel.length === 0) return undefined;
-  if (byLabel.length === 1) return byLabel[0]!.id;
-  return byLabel.find((n) => n.role === loc.role)?.id;
+  const target = normalizeLabel(loc.label);
+  let cands = nodes.filter((n) => normalizeLabel(n.label) === target);
+  // Fallback ONLY when no exact-normalised match: a node whose label starts with
+  // the target (trailing glyph / extra words). Role-scoped to avoid collisions.
+  if (cands.length === 0) {
+    cands = nodes.filter((n) => n.role === loc.role && labelMatches(n.label, loc.label));
+  }
+  if (cands.length === 0) return undefined;
+  if (cands.length === 1) return cands[0]!.id;
+  return (cands.find((n) => n.role === loc.role) ?? cands[0]!).id;
 }
 
 /** Build a semantic ActionCommand from a recipe step. Never yields a raw ref / script. */

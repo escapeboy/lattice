@@ -20,6 +20,7 @@
  */
 
 import type { NodeId } from "@lattice/perception";
+import { labelMatches } from "./label-match.js";
 
 export type RecoveryRung = "reanchor" | "alt_locator" | "l3_vision" | "handoff";
 export type RecoveryOutcome = "resolved" | "handoff";
@@ -82,13 +83,13 @@ export function locateInIG(
   const reanchorRef = refFor(target.nodeId);
   if (reanchorRef) return { reanchorRef };
 
-  // Rung 2: same role AND a matching attribute (label, else value, else href).
+  // Rung 2: same role AND a matching attribute — tolerant label match (handles
+  // decorative glyphs / case / trailing words) or, failing that, an exact value.
   const alt = nodes.find(
     (n) =>
       n.role === target.role &&
-      (n.label === target.label ||
-        (target.value !== undefined && n.value === target.value) ||
-        (n.href !== undefined && target.label !== "" && n.label === target.label)),
+      (labelMatches(n.label, target.label) ||
+        (target.value !== undefined && n.value === target.value)),
   );
   const altLocatorRef = alt ? refFor(alt.id) : undefined;
   return { ...(altLocatorRef ? { altLocatorRef } : {}) };
