@@ -24,6 +24,8 @@ export { compactNode, compactNodes, compactDelta } from "./compact.js";
 export type { CompactNode, CompactDelta } from "./compact.js";
 export { PerceptionCache } from "./cache.js";
 export type { CacheResolution } from "./cache.js";
+export { pageSignals } from "./signals.js";
+export type { PageSignals } from "./signals.js";
 
 import type { CDPHandle } from "@lattice/engine";
 import { PerceptionEngineImpl } from "./engine.js";

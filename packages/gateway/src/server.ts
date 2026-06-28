@@ -22,7 +22,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import type { EngineAdapter } from "@lattice/engine";
 import type { FidelityTier, InteractionGraph } from "@lattice/perception";
-import { compactNodes, compactDelta } from "@lattice/perception";
+import { compactNodes, compactDelta, pageSignals } from "@lattice/perception";
 import type { GrantScope, OperatorRequest, SecurityKernel } from "@lattice/kernel";
 import { SessionRegistry } from "./sessions.js";
 import type { SessionProvider, GatewaySession } from "./sessions.js";
@@ -725,6 +725,9 @@ export class GatewayServer {
         // the stable NodeId and reads role + label, not the full node scaffold.
         // The trace recorder above keeps the full nodes for replay fidelity.
         const compact = compactNodes(nodes);
+        // Page-level signals (#2): flag a bot-wall / error / canvas-only page so
+        // the agent doesn't act on a dead page as if it were normal content.
+        const signals = pageSignals(nodes, ig.title);
         const payload = {
           tier: tier === "L3" ? "L3" : ig.tier,
           url: ig.url,
@@ -732,6 +735,7 @@ export class GatewayServer {
           nodeCount: nodes.length,
           serializedSize: ig.serializedSize,
           nodes: compact,
+          ...(signals ? { signals } : {}),
           ...(d ? { delta: compactDelta(d) } : {}),
         };
         // ALL page content the agent receives is tainted — not just session_observe.
