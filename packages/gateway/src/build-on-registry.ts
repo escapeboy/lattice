@@ -57,7 +57,10 @@ export class BuildOnSessionRegistry implements SessionProvider {
     this.perceptionCache = opts.perceptionCache ? new PerceptionCache() : undefined;
   }
 
-  /** The shared per-origin limiter, if configured — network paths report 429/503 here. */
+  /** The shared per-origin limiter, if configured. NOTE: only `acquire()` (fixed
+   *  per-origin spacing, on navigate) is wired today — the adaptive `report()`
+   *  429/503 backoff has no caller because the build-on engine's NavResult
+   *  carries no HTTP status to feed back. Exposed for tests/future status feed. */
   get limiter(): OriginRateLimiter | undefined {
     return this.rateLimiter;
   }

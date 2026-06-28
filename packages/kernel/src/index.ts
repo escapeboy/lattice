@@ -13,7 +13,6 @@ export type {
   OperatorRequest,
   OperatorTier,
   PolicyClass,
-  PolicyRule,
   SecurityKernel,
   TaintedStr,
 } from "./types.js";

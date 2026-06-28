@@ -259,7 +259,7 @@ const TOOLS = [
   },
   {
     name: "budget_get",
-    description: "Operator/read: current token budget (limit + spent)",
+    description: "Operator/read: current token budget (limit + spent). ADVISORY — the gateway does not see the agent's LLM tokens, so the limit is not auto-enforced.",
     inputSchema: { type: "object" as const, properties: {} },
   },
   {
@@ -334,7 +334,7 @@ const TOOLS = [
   },
   {
     name: "budget_set",
-    description: "Operator/write: set the token budget limit. Requires a human grant token.",
+    description: "Operator/write: set the (advisory) token budget limit. Requires a human grant token. NOTE: advisory only — not enforced by the gateway.",
     inputSchema: {
       type: "object" as const,
       properties: { grant: { type: "string" }, limitTokens: { type: "number" } },
@@ -1008,7 +1008,11 @@ export class GatewayServer {
 
       case "budget_get": {
         this.auditOperatorRead("budget_get");
-        return ok(this.operatorStore.getBudget());
+        // ADVISORY ONLY: the gateway never sees the agent's LLM token usage
+        // (that's the agent's process), so `spentTokens` is not auto-debited and
+        // no action is blocked on budget. The limit is recorded for the agent to
+        // self-enforce. Real enforcement would need the agent to report spend.
+        return ok({ ...this.operatorStore.getBudget(), advisory: true, note: "advisory only — not enforced by the gateway" });
       }
 
       case "session_observe": {

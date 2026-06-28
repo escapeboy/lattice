@@ -80,11 +80,6 @@ export interface EgressRequest {
   readonly sessionId: string;
 }
 
-export interface PolicyRule {
-  actionType: string | RegExp;
-  class: PolicyClass;
-}
-
 export interface KernelConfig {
   /** Task-level origin scope — navigations outside are blocked. */
   allowedOrigins: string[];
