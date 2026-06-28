@@ -136,10 +136,39 @@ export class EgressProxy {
  * Build the `allow` decision from a destination-origin allowlist: a destination
  * is permitted iff it is the task origin or is explicitly allowlisted. This is
  * `checkEgress` minus provenance (which the proxy layer cannot see).
+ *
+ * `allowSubdomains` (opt-in, smoke gap #5): also permit a destination whose host
+ * is a SUBDOMAIN of an allowed host on the same scheme — e.g. allowing
+ * `https://vuejs.org` then also permits `https://automation.vuejs.org`. This is
+ * the common "same-site asset/subdomain" case that pure origin-exact match
+ * blocks. It is SAFE: it never crosses to a different registrable domain
+ * (allowing `vuejs.org` never permits `evil.com`), and only broadens DOWNWARD to
+ * subdomains of an explicitly-allowed host — not its parent or siblings.
  */
-export function originAllowlist(taskOrigins: ReadonlyArray<string>, egressAllowlist: ReadonlyArray<string>): (origin: string) => boolean {
+export function originAllowlist(
+  taskOrigins: ReadonlyArray<string>,
+  egressAllowlist: ReadonlyArray<string>,
+  opts: { allowSubdomains?: boolean } = {},
+): (origin: string) => boolean {
   const allowed = new Set([...taskOrigins, ...egressAllowlist]);
-  return (origin: string) => allowed.has(origin);
+  if (!opts.allowSubdomains) return (origin: string) => allowed.has(origin);
+
+  const hosts = [...allowed].map(parseOrigin).filter((p): p is { scheme: string; host: string } => p !== null);
+  return (origin: string) => {
+    if (allowed.has(origin)) return true;
+    const d = parseOrigin(origin);
+    if (!d) return false;
+    return hosts.some((a) => a.scheme === d.scheme && (d.host === a.host || d.host.endsWith(`.${a.host}`)));
+  };
+}
+
+function parseOrigin(o: string): { scheme: string; host: string } | null {
+  try {
+    const u = new URL(o);
+    return { scheme: u.protocol, host: u.hostname };
+  } catch {
+    return null;
+  }
 }
 
 export interface PendingEgress {

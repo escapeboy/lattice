@@ -11,6 +11,7 @@
  *   LATTICE_HEADED / LATTICE_DEVICE   agent-browser: headed mode / device profile
  *   LATTICE_ALLOWED_ORIGINS / LATTICE_EGRESS_ALLOWLIST / LATTICE_PROHIBITED
  *   LATTICE_EGRESS_LEARN    "1" = ask-to-allow egress (only mode that builds egressPolicy)
+ *   LATTICE_EGRESS_ALLOW_SUBDOMAINS  "1" = also allow subdomains of allowed hosts (same-site)
  *   LATTICE_NTFY_BASE / LATTICE_HANDOFF_KEY   handoff push + HMAC signing key
  *                          (unset → random per-process key: signatures break on restart)
  *   LATTICE_VAULT_KEY / LATTICE_VAULT_PATH    vault encryption + persistence
@@ -66,6 +67,9 @@ async function main(): Promise<void> {
   // unknown origin is BLOCKED but surfaced as pending for the operator to
   // allow/deny (still default-deny — nothing leaks until a human says yes).
   const egressLearn = process.env["LATTICE_EGRESS_LEARN"] === "1";
+  // Opt-in same-site relaxation: also allow subdomains of allowed hosts (e.g.
+  // automation.vuejs.org under vuejs.org) — never crosses registrable domains.
+  const allowSubdomains = process.env["LATTICE_EGRESS_ALLOW_SUBDOMAINS"] === "1";
   let egressProxy: EgressProxy | undefined;
   let egressPolicy: EgressPolicy | undefined;
   let proxyUrl: string | undefined;
@@ -75,7 +79,7 @@ async function main(): Promise<void> {
     proxyUrl = (await egressProxy.start()).url;
     console.error(`Egress firewall active (ask-to-allow) — new origins are blocked and surfaced for approval. Proxy: ${proxyUrl}`);
   } else if (allowedOrigins.length > 0 || egressAllow.length > 0) {
-    egressProxy = new EgressProxy({ allow: originAllowlist(allowedOrigins, egressAllow) });
+    egressProxy = new EgressProxy({ allow: originAllowlist(allowedOrigins, egressAllow, { allowSubdomains }) });
     proxyUrl = (await egressProxy.start()).url;
     console.error(`Egress firewall active — browser traffic gated through ${proxyUrl} (origin allowlist).`);
   }
