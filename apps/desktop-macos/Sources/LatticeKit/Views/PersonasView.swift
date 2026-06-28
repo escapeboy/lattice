@@ -36,10 +36,20 @@ public struct PersonasView: View {
                             .font(.callout).foregroundStyle(.secondary)
                     } else {
                         ForEach(model.personas) { p in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(p.personaId).font(.callout.weight(.medium))
-                                Text("\(p.sessions) live · origins: \(p.origins.isEmpty ? "—" : p.origins.joined(separator: ", "))")
-                                    .font(.caption).foregroundStyle(.secondary)
+                            VStack(alignment: .leading, spacing: 4) {
+                                HStack(spacing: 6) {
+                                    Text(p.personaId).font(.callout.weight(.medium))
+                                    Chip(text: "\(p.sessions) live",
+                                         systemImage: "dot.radiowaves.left.and.right",
+                                         tint: p.sessions > 0 ? .green : .secondary)
+                                }
+                                if p.origins.isEmpty {
+                                    Text("no origins").font(.caption).foregroundStyle(.secondary)
+                                } else {
+                                    ChipFlow(items: p.origins) { origin in
+                                        Chip(text: origin, systemImage: "globe")
+                                    }
+                                }
                             }
                         }
                     }

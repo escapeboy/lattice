@@ -23,6 +23,7 @@ import { SecurityKernelImpl } from "@lattice/kernel";
 import { NtfyTransport, Vault } from "@lattice/gateway";
 import { EgressProxy, EgressPolicy, originAllowlist } from "@lattice/egress-proxy";
 import { createLatticeCore, resolveEngineKind } from "./index.js";
+import { migrateLegacyTraces } from "./migrate-traces.js";
 
 function list(env: string | undefined): string[] {
   return (env ?? "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -104,6 +105,10 @@ async function main(): Promise<void> {
 
   // Default trace sink: write each Svod note under LATTICE_TRACE_DIR.
   const traceDir = process.env["LATTICE_TRACE_DIR"] ?? "./traces";
+  // Self-heal any legacy `*.md.md` traces left by the old double-extension bug.
+  void migrateLegacyTraces(traceDir).then((n) => {
+    if (n > 0) console.error(`migrated ${n} legacy *.md.md trace file(s)`);
+  });
   const traceWriter = async (path: string, content: string): Promise<void> => {
     const safe = path.replace(/[/\\]/g, "_");
     const abs = join(traceDir, safe.endsWith(".md") ? safe : `${safe}.md`);

@@ -73,10 +73,10 @@ public struct ApprovalsView: View {
     private func approvalRow(_ a: Approval) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(a.summary).font(.headline)
-            HStack(spacing: 8) {
-                Label(a.actionType, systemImage: "bolt").font(.caption)
-                Label(a.origin, systemImage: "globe").font(.caption).lineLimit(1)
-            }.foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                Chip(text: a.actionType, systemImage: "bolt", tint: .orange)
+                Chip(text: a.origin, systemImage: "globe")
+            }
             Text("session \(a.sessionId.prefix(8))").font(.caption2).foregroundStyle(.tertiary)
             HStack(spacing: 8) {
                 Button("Approve") {
@@ -102,7 +102,7 @@ public struct ApprovalsView: View {
             Label(h.reason, systemImage: h.type == "input" ? "keyboard" : "hand.raised")
                 .font(.headline)
             if !h.origin.isEmpty {
-                Label(h.origin, systemImage: "globe").font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Chip(text: h.origin, systemImage: "globe")
             }
             if h.type == "input" {
                 HStack(spacing: 8) {
