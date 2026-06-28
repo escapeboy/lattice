@@ -58,12 +58,17 @@ public final class StackController: ObservableObject {
             return
         }
         let dataDir = BackendLocator.appSupportDirectory()
+        // The backend log is append-only (O_APPEND fd redirect), so it would grow
+        // unbounded across a long-running install. Roll it once at launch when it
+        // crosses the cap, keeping a single .1 backup — bounded disk, recent logs.
+        let logFile = dataDir.appendingPathComponent("backend.log")
+        Self.rotateLogIfNeeded(logFile)
         let config = SupervisorConfig(
             backendBinary: backend,
             workingDirectory: dataDir,
             environment: backendEnvironment(dataDir: dataDir),
             healthURL: healthURL,
-            logFile: dataDir.appendingPathComponent("backend.log"))
+            logFile: logFile)
 
         let sup = Supervisor(config: config)
         sup.onState = { [weak self] s in
@@ -145,6 +150,19 @@ public final class StackController: ObservableObject {
         supervisor?.stop()
         supervisor = nil
         client = nil
+    }
+
+    /// Roll `backend.log` to `backend.log.1` when it exceeds the size cap (5 MB),
+    /// replacing any prior backup. Keeps exactly one generation so disk stays
+    /// bounded. No-op when the file is small or absent.
+    nonisolated static let logRotateCapBytes: UInt64 = 5 * 1024 * 1024
+    nonisolated static func rotateLogIfNeeded(_ logFile: URL) {
+        let fm = FileManager.default
+        guard let size = try? fm.attributesOfItem(atPath: logFile.path)[.size] as? UInt64,
+              size > logRotateCapBytes else { return }
+        let backup = logFile.appendingPathExtension("1")
+        try? fm.removeItem(at: backup)
+        try? fm.moveItem(at: logFile, to: backup)
     }
 
     private func backendEnvironment(dataDir: URL) -> [String: String] {

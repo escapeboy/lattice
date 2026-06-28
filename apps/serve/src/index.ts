@@ -8,7 +8,7 @@
  * and handoffs raised by the agent are resolvable from the control-plane UI.
  */
 
-import { createAgentGateway, createBuildOnGateway, type GatewayObserver, type GatewayServer, type NotificationTransport, type Vault } from "@lattice/gateway";
+import { createAgentGateway, createBuildOnGateway, type BuildOnRegistryOptions, type GatewayObserver, type GatewayServer, type NotificationTransport, type Vault } from "@lattice/gateway";
 import type { EngineAdapter } from "@lattice/engine";
 import type { SemanticEngine } from "@lattice/engine-adapter";
 import type { SecurityKernel } from "@lattice/kernel";
@@ -57,6 +57,9 @@ export interface LatticeServeConfig {
   replayArchivePath?: string;
   /** Bearer token required on the /mcp endpoint when set (A2). */
   mcpToken?: string;
+  /** Per-origin navigation rate limit (build-on path). Omitted → no throttle.
+   *  Stops an agent from hammering a site (abuse / IP-ban / DoS-like load). */
+  rateLimit?: BuildOnRegistryOptions["rateLimit"];
 }
 
 /**
@@ -108,7 +111,11 @@ export function createLatticeCore(config: LatticeServeConfig): LatticeCore {
   let gateway: GatewayServer;
   if (config.engineKind === "agent-browser") {
     if (!config.buildOnEngine) throw new Error('engineKind "agent-browser" requires a launched buildOnEngine');
-    gateway = createBuildOnGateway({ engine: config.buildOnEngine, ...shared });
+    gateway = createBuildOnGateway({
+      engine: config.buildOnEngine,
+      ...shared,
+      ...(config.rateLimit ? { registry: { rateLimit: config.rateLimit } } : {}),
+    });
   } else {
     if (!config.engine) throw new Error('engineKind "cdp" requires a launched engine');
     gateway = createAgentGateway({ engine: config.engine, ...shared });

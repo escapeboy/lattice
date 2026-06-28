@@ -11,6 +11,7 @@
  *   LATTICE_NTFY_BASE / LATTICE_HANDOFF_KEY   handoff push + signing
  *   LATTICE_VAULT_KEY / LATTICE_VAULT_PATH    vault encryption + persistence
  *   LATTICE_PII_FULL_ORIGINS  origins to log in full (default: all redacted)
+ *   LATTICE_RATE_LIMIT_RPS    per-origin navigation rate (default 4; 0 disables)
  */
 
 import { mkdir, writeFile } from "node:fs/promises";
@@ -132,10 +133,16 @@ async function main(): Promise<void> {
       ? { defaultMode: "redacted" as const, perOrigin: Object.fromEntries(piiFullOrigins.map((o) => [o, "full" as const])) }
       : undefined;
 
+  // Per-origin navigation throttle (build-on path), ON by default so a runaway
+  // agent can't hammer a site. Tune with LATTICE_RATE_LIMIT_RPS; 0 disables.
+  const rlRps = Number(process.env["LATTICE_RATE_LIMIT_RPS"] ?? 4);
+  const rateLimit = Number.isFinite(rlRps) && rlRps > 0 ? { requestsPerSecond: rlRps } : undefined;
+
   const { gateway, control } = createLatticeCore({
     engineKind,
     ...(cdpEngine ? { engine: cdpEngine } : {}),
     ...(buildOnEngine ? { buildOnEngine } : {}),
+    ...(rateLimit ? { rateLimit } : {}),
     kernel,
     vault: new Vault(vaultKey, vaultPath),
     traceWriter,
@@ -185,6 +192,19 @@ async function main(): Promise<void> {
   };
   process.on("SIGINT", shutdown);
   process.on("SIGTERM", shutdown);
+
+  // Last-resort traps. A dropped promise shouldn't take down every live session,
+  // so log and keep running; a truly broken state (uncaught throw) exits non-zero
+  // so the desktop supervisor restarts us — but reap the detached engine daemon
+  // first so the crash never orphans a browser process.
+  process.on("unhandledRejection", (reason) => {
+    console.error("unhandledRejection:", reason);
+  });
+  process.on("uncaughtException", (err) => {
+    console.error("uncaughtException — exiting for supervisor restart:", err);
+    try { reapEngineDaemons(); } catch { /* best-effort */ }
+    process.exit(1);
+  });
   // Parent-death watchdog: the desktop app passes its own PID as LATTICE_PARENT_PID
   // and we poll it with `kill(pid, 0)`. When the app dies — even via SIGKILL at the
   // macOS force-quit deadline, whose AppKit callbacks never run — the probe throws
