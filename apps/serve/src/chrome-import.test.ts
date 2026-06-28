@@ -2,7 +2,7 @@
 
 import { describe, it, expect } from "vitest";
 import { createCipheriv, randomBytes } from "node:crypto";
-import { decryptCookieValue, hostMatches, importChromeCookies } from "./chrome-import.js";
+import { decryptCookieValue, hostMatches, importChromeCookies, listChromeProfiles } from "./chrome-import.js";
 
 /** Encrypt a value the way Chrome does (v10: AES-128-CBC, IV = 16 spaces). */
 function sealV10(plaintext: string, key: Buffer): string {
@@ -43,5 +43,23 @@ describe("chrome-import — platform guard", () => {
   it("rejects non-macOS platforms with a clear error", () => {
     if (process.platform === "darwin") return; // can't simulate easily on mac
     expect(() => importChromeCookies("Default", ["https://x.com"])).toThrow(/macOS only/);
+  });
+});
+
+describe("chrome-import — profile resolution", () => {
+  it("lists profiles as {dir,name} without prompting the Keychain", () => {
+    if (process.platform !== "darwin") return;
+    const profiles = listChromeProfiles();
+    expect(Array.isArray(profiles)).toBe(true);
+    for (const p of profiles) {
+      expect(typeof p.dir).toBe("string");
+      expect(typeof p.name).toBe("string");
+    }
+  });
+
+  it("errors on an unknown profile and names the available ones", () => {
+    if (process.platform !== "darwin" || !listChromeProfiles().length) return;
+    expect(() => importChromeCookies("NoSuchProfile-zzz", ["https://x.com"]))
+      .toThrow(/not found\. Available profiles:/);
   });
 });

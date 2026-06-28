@@ -4,6 +4,10 @@
  */
 
 import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
+import { rmSync } from "node:fs";
 import { SecurityKernelImpl } from "@lattice/kernel";
 import { ControlPlaneServer } from "./server.js";
 import { ApprovalInbox } from "./inbox.js";
@@ -30,6 +34,39 @@ describe("ControlPlaneServer — full-trace retention is ephemeral + bounded", (
       expect(ids.traces).toContain("t59"); // newest kept
     } finally {
       await server.stop();
+    }
+  });
+
+  it("persists the redacted Replay archive and reloads it on restart", async () => {
+    const path = join(tmpdir(), `lattice-replay-${randomUUID()}.json`);
+    try {
+      // First boot: submit a trace with events → persists summary + redacted rows.
+      const s1 = new ControlPlaneServer(undefined, undefined, undefined, { replayArchivePath: path });
+      await s1.start(0, "127.0.0.1");
+      s1.submitTrace({
+        traceId: "tr1", sessionId: "sess1", startTs: 0, endTs: 100,
+        events: [
+          { kind: "session_start", ts: 0, topology: "ephemeral" },
+          { kind: "session_end", ts: 100, durationMs: 100 },
+        ],
+      } as unknown as SessionTrace);
+      await s1.stop();
+
+      // Simulated restart: a fresh server with the same archive path.
+      const s2 = new ControlPlaneServer(undefined, undefined, undefined, { replayArchivePath: path });
+      const { url } = await s2.start(0, "127.0.0.1");
+      try {
+        const traces = (await (await fetch(`${url}/traces`)).json()) as { traces: Array<{ traceId: string }> };
+        expect(traces.traces.map((t) => t.traceId)).toContain("tr1"); // summary survived
+
+        const ev = (await (await fetch(`${url}/replay/tr1/events`)).json()) as { events: Array<{ text: string }> };
+        expect(ev.events.length).toBeGreaterThan(0); // redacted timeline survived
+        expect(ev.events.some((e) => e.text.includes("session start"))).toBe(true);
+      } finally {
+        await s2.stop();
+      }
+    } finally {
+      rmSync(path, { force: true });
     }
   });
 });
@@ -63,6 +100,11 @@ describe("ControlPlaneServer — native-timeline + operator read surfaces (D5)",
       applyPolicy: (p) => ({ allowedOrigins: [], egressAllowlist: [], prohibitedActions: [], requireGrant: [], ...p }),
       setBudget: () => {},
       importPersona: () => Promise.resolve({ imported: 0, origins: [] }),
+      listChromeProfiles: () => [{ dir: "Default", name: "Person 1" }],
+      storeVaultCredential: () => ({ id: "cred1" }),
+      connectProvider: () => ({ logins: 0 }),
+      disconnectProvider: () => {},
+      providerStatus: () => [{ id: "1password", label: "1Password", needsSession: false, available: false, ready: false, connected: false, logins: 0 }],
       listPersonas: () => [{ personaId: "ada", origins: ["example.com"], sessions: 1 }],
       listVault: () => [{ id: "v1", origin: "https://example.com", label: "login" }],
       egressPending: () => [{ origin: "https://new.com", firstSeen: 1, attempts: 2 }],

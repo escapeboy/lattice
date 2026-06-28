@@ -37,8 +37,12 @@ export interface HandoffRequest {
   readonly sessionId: string;
   readonly origin: string;
   readonly reason: string;
-  /** For input handoffs: which field the human is asked to provide. */
+  /** For input handoffs: which field the human is asked to provide (human label). */
   readonly field?: string;
+  /** For input handoffs: the perception nodeId the value is filled into. Stored
+   *  at raise time (the agent knows it) so the operator only supplies the VALUE
+   *  — they never need to know node ids or session ids. */
+  readonly fieldNodeId?: string;
   readonly createdAt: number;
   readonly ttlMs: number;
   /** HMAC over the request — the PWA verifies this before rendering a form. */
@@ -133,7 +137,7 @@ export class HandoffManager {
    * everywhere). Returns the request; the agent polls status, it does not block.
    */
   async raise(
-    opts: { type: HandoffType; sessionId: string; origin: string; reason: string; field?: string; ttlMs?: number },
+    opts: { type: HandoffType; sessionId: string; origin: string; reason: string; field?: string; fieldNodeId?: string; ttlMs?: number },
     devices: readonly DeviceRecord[],
   ): Promise<HandoffRequest> {
     const id = randomUUID();
@@ -154,6 +158,7 @@ export class HandoffManager {
       origin: opts.origin,
       reason: opts.reason,
       ...(opts.field !== undefined ? { field: opts.field } : {}),
+      ...(opts.fieldNodeId !== undefined ? { fieldNodeId: opts.fieldNodeId } : {}),
       createdAt,
       ttlMs: opts.ttlMs ?? this.defaultTtlMs,
       signature,

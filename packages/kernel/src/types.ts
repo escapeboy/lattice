@@ -99,6 +99,12 @@ export interface KernelConfig {
 export interface SecurityKernel {
   classify(request: CapabilityRequest): PolicyClass;
   requestGrant(request: CapabilityRequest): Promise<GrantDecision>;
+  /**
+   * Wire the human grant handler for consequential actions after construction.
+   * Needed because the approval inbox lives in the control plane, which is built
+   * after the kernel — this closes the mutual dependency.
+   */
+  setGrantHandler(handler: (req: CapabilityRequest) => Promise<GrantDecision>): void;
   checkEgress(req: EgressRequest): boolean;
   /** Origin scoping: is a navigation target within the task's allowed origins? */
   checkNavigation(targetUrl: string): boolean;

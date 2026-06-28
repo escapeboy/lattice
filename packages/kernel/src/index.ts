@@ -21,6 +21,7 @@ export type {
 export { taint } from "./types.js";
 export { SecurityKernelImpl } from "./kernel.js";
 export { CONSTITUTIONAL_FLOOR, OperatorGate, violatesFloor } from "./operator.js";
+export { actionCatalog, type ActionCatalogEntry, type ActionCategory } from "./catalog.js";
 
 import { SecurityKernelImpl } from "./kernel.js";
 import type { KernelConfig, SecurityKernel } from "./types.js";

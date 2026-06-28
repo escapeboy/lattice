@@ -65,13 +65,9 @@ export interface HandoffLike {
 export interface ControlPlaneBackend {
   kernel: { mintHumanGrant(scope: { tool: string; sessionId: string }): string };
   handoffs: HandoffLike;
-  submitHandoffInput(
-    handoffId: string,
-    deviceId: string,
-    sessionId: string,
-    fieldNodeId: string,
-    value: string,
-  ): Promise<boolean>;
+  /** Fulfil an input handoff — the value flows Vault→form; session + field are
+   *  resolved from the stored handoff, so only the value is supplied. */
+  submitHandoffInput(handoffId: string, deviceId: string, value: string): Promise<boolean>;
   /** Confirm a pending device with the OOB challenge it received. */
   verifyDevice(deviceId: string, challenge: string): boolean;
   /** Apply a human policy edit to the LIVE kernel (floor re-asserted). */
@@ -80,10 +76,20 @@ export interface ControlPlaneBackend {
   setBudget(limitTokens: number): void;
   /** Human-initiated persona import from a real browser profile (credential-bearing). */
   importPersona(personaId: string, profile: string, origins: string[]): Promise<{ imported: number; origins: string[] }>;
+  /** On-disk Chrome profiles available to import from (dir name + display name). */
+  listChromeProfiles(): Array<{ dir: string; name: string }>;
+  /** Store a credential directly in the local encrypted vault (operator-entered). */
+  storeVaultCredential(label: string, origin: string, username: string, password: string): { id: string };
+  /** Connect a credential provider (1Password / Bitwarden / Apple Keychain) as a source. */
+  connectProvider(id: string, opts?: { scope?: string; session?: string }): { logins: number };
+  /** Disconnect a credential provider. */
+  disconnectProvider(id: string): void;
+  /** Per-provider availability + connection status. */
+  providerStatus(): Array<{ id: string; label: string; needsSession: boolean; available: boolean; ready: boolean; detail?: string; connected: boolean; scope?: string; logins: number }>;
   /** Operator read surface: known personas (id + origins + live sessions). No values. */
   listPersonas(): Array<{ personaId: string; origins: string[]; sessions: number }>;
-  /** Operator read surface: vault entries as id/origin/label ONLY — never credentials. */
-  listVault(): Array<{ id: string; origin: string; label: string }>;
+  /** Operator read surface: vault entries as id/origin/label/source ONLY — never credentials. */
+  listVault(): Array<{ id: string; origin: string; label: string; source?: string }>;
   /** Ask-to-allow egress: origins the agent tried to reach that are awaiting a decision. */
   egressPending(): Array<{ origin: string; firstSeen: number; attempts: number }>;
   /** Operator allows a pending egress origin (lets it through from the next attempt). */

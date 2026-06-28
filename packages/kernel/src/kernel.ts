@@ -39,7 +39,7 @@ const ALWAYS_PROHIBITED: ReadonlySet<string> = new Set(
 );
 
 // Action types that are consequential by default
-const CONSEQUENTIAL_DEFAULTS = new Set([
+export const CONSEQUENTIAL_DEFAULTS = new Set([
   "submit",
   "form.submit",
   "download",
@@ -72,6 +72,10 @@ export class SecurityKernelImpl implements SecurityKernel {
   private readonly operator = new OperatorGate();
 
   constructor(private readonly config: KernelConfig) {}
+
+  setGrantHandler(handler: (req: CapabilityRequest) => Promise<GrantDecision>): void {
+    this.config.grantHandler = handler;
+  }
 
   classify(request: CapabilityRequest): PolicyClass {
     const { actionType } = request;

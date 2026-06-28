@@ -105,7 +105,8 @@ async function main(): Promise<void> {
   // Default trace sink: write each Svod note under LATTICE_TRACE_DIR.
   const traceDir = process.env["LATTICE_TRACE_DIR"] ?? "./traces";
   const traceWriter = async (path: string, content: string): Promise<void> => {
-    const abs = join(traceDir, `${path.replace(/[/\\]/g, "_")}.md`);
+    const safe = path.replace(/[/\\]/g, "_");
+    const abs = join(traceDir, safe.endsWith(".md") ? safe : `${safe}.md`);
     await mkdir(dirname(abs), { recursive: true });
     await writeFile(abs, content, "utf8");
   };
@@ -139,6 +140,9 @@ async function main(): Promise<void> {
     ...(egressPolicy ? { egressPolicy } : {}),
     controlPlaneToken: cpToken,
     mcpToken,
+    // Persist the redacted Replay archive next to the trace notes so the Replay
+    // tab survives an app restart (full traces stay in-memory only).
+    replayArchivePath: join(traceDir, "replay-archive.json"),
   });
 
   // Hard-reap any agent-browser daemon we spawned. The daemon `setsid`-detaches

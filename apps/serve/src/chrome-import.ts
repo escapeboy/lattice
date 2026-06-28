@@ -14,7 +14,7 @@
 
 import { execFileSync } from "node:child_process";
 import { pbkdf2Sync, createDecipheriv } from "node:crypto";
-import { copyFileSync, existsSync, rmSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -62,18 +62,52 @@ export function decryptCookieValue(encHex: string, key: Buffer): string {
   return out.subarray(start).toString("utf8");
 }
 
+const chromeRoot = (): string =>
+  join(homedir(), "Library", "Application Support", "Google", "Chrome");
+
+/** On-disk Chrome profiles that have a cookie store, with their display names. */
+export function listChromeProfiles(): Array<{ dir: string; name: string }> {
+  const root = chromeRoot();
+  if (!existsSync(root)) return [];
+  let displayNames: Record<string, string> = {};
+  try {
+    const local = JSON.parse(readFileSync(join(root, "Local State"), "utf8"));
+    for (const [dir, info] of Object.entries(local?.profile?.info_cache ?? {})) {
+      displayNames[dir] = (info as { name?: string })?.name ?? dir;
+    }
+  } catch { /* Local State missing/unreadable — fall back to dir names */ }
+  const out: Array<{ dir: string; name: string }> = [];
+  for (const entry of readdirSync(root, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    if (!existsSync(join(root, entry.name, "Cookies"))) continue;
+    out.push({ dir: entry.name, name: displayNames[entry.name] ?? entry.name });
+  }
+  return out;
+}
+
+/** Resolve a user-typed profile (dir name OR display name, case-insensitive). */
+function resolveProfileDir(profile: string): string | undefined {
+  const profiles = listChromeProfiles();
+  const want = profile.trim().toLowerCase();
+  return profiles.find((p) => p.dir.toLowerCase() === want || p.name.toLowerCase() === want)?.dir
+    ?? (existsSync(join(chromeRoot(), profile, "Cookies")) ? profile : undefined);
+}
+
 /**
  * Read cookies for the given origins from a Chrome profile and decrypt them.
- * @param profile Chrome profile dir name (e.g. "Default", "Profile 1").
+ * @param profile Chrome profile dir name ("Default", "Profile 1") OR its display
+ *   name as shown in Chrome's profile switcher ("Person 1", "Work"…).
  */
 export function importChromeCookies(profile: string, origins: string[]): ImportedCookie[] {
   if (process.platform !== "darwin") {
     throw new Error("persona_import currently supports macOS only (Chrome cookie encryption is Keychain-bound).");
   }
-  const dbPath = join(homedir(), "Library", "Application Support", "Google", "Chrome", profile, "Cookies");
-  if (!existsSync(dbPath)) {
-    throw new Error(`Chrome cookie store not found for profile "${profile}" (${dbPath}).`);
+  const dir = resolveProfileDir(profile);
+  if (!dir) {
+    const available = listChromeProfiles().map((p) => `"${p.dir}" (${p.name})`).join(", ") || "none found";
+    throw new Error(`Chrome profile "${profile}" not found. Available profiles: ${available}.`);
   }
+  const dbPath = join(chromeRoot(), dir, "Cookies");
   // Copy the DB so a running Chrome's lock doesn't block the read.
   const tmp = join(tmpdir(), `lattice-cookies-${Date.now()}.sqlite`);
   copyFileSync(dbPath, tmp);

@@ -17,15 +17,18 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import type { Server } from "node:http";
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 import { ApprovalInbox } from "./inbox.js";
 import { PolicyEditor } from "./policy.js";
 import { OperatorGrantInbox } from "./operator-grants.js";
 import { buildUI } from "./ui.js";
 import { buildHandoffPage } from "./handoff-page.js";
-import { buildReplayPage, traceEventRows } from "./replay-page.js";
+import { buildReplayPage, buildReplayPageFromRows, traceEventRows, type TraceEventRow } from "./replay-page.js";
 import type { ControlPlaneBackend, PolicyConfig, SessionView } from "./types.js";
 import type { SessionTrace } from "@lattice/observability";
 import { extractMetrics } from "@lattice/observability";
+import { actionCatalog } from "@lattice/kernel";
 
 interface TraceMetricsSummary {
   traceId: string;
@@ -53,24 +56,63 @@ export class ControlPlaneServer {
    * persistent store.
    */
   private readonly fullTraces = new Map<string, SessionTrace>();
+  /**
+   * Durable replay archive: the REDACTED timeline projection (`traceEventRows`)
+   * + metrics summary per trace, persisted to disk and reloaded on startup so
+   * the Replay tab survives an app restart. This holds NO un-redacted page
+   * content — values are truncated and form contents dropped, matching the PII
+   * posture of every trace surface — so it does not weaken the privacy design
+   * that keeps `fullTraces` in-memory only.
+   */
+  private readonly archivedEvents = new Map<string, TraceEventRow[]>();
+  private static readonly ARCHIVE_CAP = 200;
   readonly inbox: ApprovalInbox;
   readonly policy: PolicyEditor;
   readonly grants: OperatorGrantInbox | null;
   private readonly backend: ControlPlaneBackend | null;
   /** When set, every state-changing route requires `Authorization: Bearer <token>`. */
   private readonly authToken: string | null;
+  private readonly replayArchivePath: string | null;
 
-  constructor(initial?: Partial<PolicyConfig>, backend?: ControlPlaneBackend, authToken?: string) {
+  constructor(initial?: Partial<PolicyConfig>, backend?: ControlPlaneBackend, authToken?: string, options?: { replayArchivePath?: string }) {
     this.inbox = new ApprovalInbox();
     this.policy = new PolicyEditor(initial);
     this.backend = backend ?? null;
     this.authToken = authToken ?? null;
     this.grants = backend ? new OperatorGrantInbox(backend.kernel) : null;
+    this.replayArchivePath = options?.replayArchivePath ?? null;
+    this.loadReplayArchive();
 
     // Forward approval queue changes to SSE clients
     this.inbox.onRequest(() => {
       this.broadcast({ type: "approvals", data: this.inbox.pendingList() });
     });
+  }
+
+  /** Load the persisted replay archive (summaries + redacted rows) on startup. */
+  private loadReplayArchive(): void {
+    if (!this.replayArchivePath || !existsSync(this.replayArchivePath)) return;
+    try {
+      const raw = JSON.parse(readFileSync(this.replayArchivePath, "utf8")) as Array<{ summary: TraceMetricsSummary; events: TraceEventRow[] }>;
+      for (const { summary, events } of raw) {
+        this.traces.push(summary);
+        this.archivedEvents.set(summary.traceId, events);
+      }
+      this.traces.sort((a, b) => b.recordedAt - a.recordedAt); // newest first
+    } catch { /* corrupt archive → start fresh, never block boot */ }
+  }
+
+  /** Write the replay archive to disk (best-effort; never blocks a trace). */
+  private persistReplayArchive(): void {
+    if (!this.replayArchivePath) return;
+    try {
+      const entries = this.traces.slice(0, ControlPlaneServer.ARCHIVE_CAP).map((s) => ({
+        summary: s,
+        events: this.archivedEvents.get(s.traceId) ?? [],
+      }));
+      mkdirSync(dirname(this.replayArchivePath), { recursive: true });
+      writeFileSync(this.replayArchivePath, JSON.stringify(entries), "utf8");
+    } catch { /* best-effort persistence */ }
   }
 
   /** Raise a pending operator-grant request (called by the gateway observer). */
@@ -103,12 +145,19 @@ export class ControlPlaneServer {
       successRate: m.successRate,
       recordedAt: trace.endTs,
     });
-    if (this.traces.length > 100) this.traces.length = 100;
+    // Durable, PII-safe archive: the redacted row projection (not the full trace).
+    this.archivedEvents.set(trace.traceId, traceEventRows(trace));
+    if (this.traces.length > ControlPlaneServer.ARCHIVE_CAP) {
+      for (const evicted of this.traces.splice(ControlPlaneServer.ARCHIVE_CAP)) {
+        this.archivedEvents.delete(evicted.traceId);
+      }
+    }
     this.fullTraces.set(trace.traceId, trace);
     if (this.fullTraces.size > 50) {
       const oldest = this.fullTraces.keys().next().value;
       if (oldest !== undefined) this.fullTraces.delete(oldest);
     }
+    this.persistReplayArchive();
     this.broadcast({ type: "trace", data: this.traces.slice(0, 10) });
   }
 
@@ -219,6 +268,13 @@ export class ControlPlaneServer {
       return;
     }
 
+    // Known action types (with labels + category) so the Policy UI offers a
+    // picker instead of free text. Static governance metadata — no PII, open GET.
+    if (method === "GET" && path === "/action-catalog") {
+      json(res, { catalog: actionCatalog() });
+      return;
+    }
+
     if (method === "PUT" && path === "/policy") {
       const body = await readBody(req);
       if (!body) { res.writeHead(400).end("No body"); return; }
@@ -230,6 +286,56 @@ export class ControlPlaneServer {
       if (this.backend && typeof patch.budgetLimit === "number") this.backend.setBudget(patch.budgetLimit);
       this.broadcast({ type: "policy", data: applied });
       json(res, applied);
+      return;
+    }
+
+    // Chrome profiles available for import (so the UI can offer the real names).
+    if (this.backend && method === "GET" && path === "/chrome-profiles") {
+      json(res, { profiles: this.backend.listChromeProfiles() });
+      return;
+    }
+
+    // Credential providers (1Password / Bitwarden / Apple Keychain): status.
+    if (this.backend && method === "GET" && path === "/providers") {
+      json(res, { providers: this.backend.providerStatus() });
+      return;
+    }
+    // Connect a provider as a credential source.
+    if (this.backend && method === "POST" && path === "/providers/connect") {
+      const body = await readBody(req);
+      const { id, scope, session } = (body ? JSON.parse(body) : {}) as { id?: string; scope?: string; session?: string };
+      if (!id) { res.writeHead(400).end("provider id required"); return; }
+      try {
+        const opts: { scope?: string; session?: string } = {};
+        if (scope) opts.scope = scope;
+        if (session) opts.session = session;
+        json(res, this.backend.connectProvider(id, opts));
+      } catch (e) {
+        res.writeHead(500, { "Content-Type": "application/json" }).end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
+      }
+      return;
+    }
+    if (this.backend && method === "POST" && path === "/providers/disconnect") {
+      const body = await readBody(req);
+      const { id } = (body ? JSON.parse(body) : {}) as { id?: string };
+      if (!id) { res.writeHead(400).end("provider id required"); return; }
+      this.backend.disconnectProvider(id);
+      json(res, { connected: false });
+      return;
+    }
+
+    // Store a credential directly in the local encrypted vault (operator-entered).
+    if (this.backend && method === "POST" && path === "/vault/store") {
+      const body = await readBody(req);
+      const { label, origin, username, password } = (body ? JSON.parse(body) : {}) as
+        { label?: string; origin?: string; username?: string; password?: string };
+      if (!origin || !password) { res.writeHead(400).end("origin and password required"); return; }
+      try {
+        const result = this.backend.storeVaultCredential(label ?? origin, origin, username ?? "", password);
+        json(res, { ...result, note: "credential sealed in the local vault — the value never reaches the model or agent" });
+      } catch (e) {
+        res.writeHead(500, { "Content-Type": "application/json" }).end(JSON.stringify({ error: e instanceof Error ? e.message : String(e) }));
+      }
       return;
     }
 
@@ -260,25 +366,44 @@ export class ControlPlaneServer {
     // text/values, just summarized rows.
     const replayEventsMatch = path.match(/^\/replay\/([^/]+)\/events$/);
     if (method === "GET" && replayEventsMatch) {
-      const trace = this.fullTraces.get(replayEventsMatch[1]!);
-      if (!trace) { res.writeHead(404).end("trace not found"); return; }
-      json(res, {
-        traceId: trace.traceId,
-        sessionId: trace.sessionId,
-        startTs: trace.startTs,
-        events: traceEventRows(trace),
-      });
+      const id = replayEventsMatch[1]!;
+      const trace = this.fullTraces.get(id);
+      if (trace) {
+        json(res, { traceId: trace.traceId, sessionId: trace.sessionId, startTs: trace.startTs, events: traceEventRows(trace) });
+        return;
+      }
+      // Restored-from-disk trace: serve the archived redacted rows.
+      const archived = this.archivedEvents.get(id);
+      if (archived) {
+        const summary = this.traces.find((t) => t.traceId === id);
+        json(res, { traceId: id, sessionId: summary?.sessionId ?? "", startTs: 0, events: archived });
+        return;
+      }
+      res.writeHead(404).end("trace not found");
       return;
     }
 
     if (method === "GET" && replayMatch) {
-      const trace = this.fullTraces.get(replayMatch[1]!);
-      if (!trace) { res.writeHead(404).end("trace not found"); return; }
-      res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(buildReplayPage(trace));
+      const id = replayMatch[1]!;
+      const trace = this.fullTraces.get(id);
+      if (trace) {
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" }).end(buildReplayPage(trace));
+        return;
+      }
+      const archived = this.archivedEvents.get(id);
+      if (archived) {
+        const summary = this.traces.find((t) => t.traceId === id);
+        res.writeHead(200, { "Content-Type": "text/html; charset=utf-8" })
+          .end(buildReplayPageFromRows(id, summary?.sessionId ?? "", archived));
+        return;
+      }
+      res.writeHead(404).end("trace not found");
       return;
     }
 
     if (method === "GET" && path === "/replay") {
+      // Lists the full-fidelity (PII) traces held in memory — bounded, ephemeral.
+      // The durable, redacted Replay history is served via /traces + /replay/:id/events.
       json(res, { traces: Array.from(this.fullTraces.keys()) });
       return;
     }
@@ -403,12 +528,10 @@ export class ControlPlaneServer {
     const handoffInput = path.match(/^\/handoff\/([^/]+)\/input$/);
     if (this.backend && method === "POST" && handoffInput) {
       const body = await readBody(req);
-      const { deviceId, sessionId, fieldNodeId, value } = (body ? JSON.parse(body) : {}) as
-        { deviceId?: string; sessionId?: string; fieldNodeId?: string; value?: string };
-      // The value flows backend→form via Vault; it is never echoed back here.
-      const filled = await this.backend.submitHandoffInput(
-        handoffInput[1]!, deviceId ?? "web", sessionId ?? "", fieldNodeId ?? "", value ?? "",
-      );
+      const { deviceId, value } = (body ? JSON.parse(body) : {}) as { deviceId?: string; value?: string };
+      // The value flows backend→form via Vault; it is never echoed back here. The
+      // target session + field are resolved from the stored handoff (not the body).
+      const filled = await this.backend.submitHandoffInput(handoffInput[1]!, deviceId ?? "web", value ?? "");
       this.broadcast({ type: "handoffs", data: this.backend.handoffs.pending() });
       json(res, { filled, note: "value written to the form — not retained" });
       return;

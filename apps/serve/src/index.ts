@@ -15,7 +15,7 @@ import type { SecurityKernel } from "@lattice/kernel";
 import { ControlPlaneServer } from "@lattice/control-plane";
 import { emitToSvod, type SvodWriteFn, type PiiPolicy } from "@lattice/observability";
 import type { EgressPolicy } from "@lattice/egress-proxy";
-import { importChromeCookies } from "./chrome-import.js";
+import { importChromeCookies, listChromeProfiles } from "./chrome-import.js";
 
 export interface LatticeCore {
   gateway: GatewayServer;
@@ -52,6 +52,9 @@ export interface LatticeServeConfig {
   egressPolicy?: EgressPolicy;
   /** Bearer token required on the control plane's state-changing routes. */
   controlPlaneToken?: string;
+  /** File the Replay archive (redacted rows + metrics) persists to, so Replay
+   *  survives an app restart. Omitted → Replay stays in-memory only. */
+  replayArchivePath?: string;
   /** Bearer token required on the /mcp endpoint when set (A2). */
   mcpToken?: string;
 }
@@ -114,8 +117,8 @@ export function createLatticeCore(config: LatticeServeConfig): LatticeCore {
   const control = new ControlPlaneServer(undefined, {
     kernel: config.kernel,
     handoffs: gateway.handoffs,
-    submitHandoffInput: (handoffId, deviceId, sessionId, fieldNodeId, value) =>
-      gateway.submitHandoffInput(handoffId, deviceId, sessionId, fieldNodeId, value),
+    submitHandoffInput: (handoffId, deviceId, value) =>
+      gateway.submitHandoffInput(handoffId, deviceId, value),
     verifyDevice: (deviceId, challenge) => gateway.verifyDevice(deviceId, challenge),
     applyPolicy: (patch) => {
       const p = gateway.applyOperatorPolicy(patch);
@@ -129,13 +132,26 @@ export function createLatticeCore(config: LatticeServeConfig): LatticeCore {
       const imported = gateway.importPersonaCookies(personaId, origins, cookies);
       return Promise.resolve({ imported, origins });
     },
+    listChromeProfiles: () => listChromeProfiles(),
+    storeVaultCredential: (label, origin, username, password) =>
+      gateway.storeVaultCredential(label, origin, username, password),
+    connectProvider: (id, opts) => gateway.connectProvider(id, opts),
+    disconnectProvider: (id) => gateway.disconnectProvider(id),
+    providerStatus: () => gateway.providerStatus(),
     listPersonas: () => gateway.listPersonas(),
     listVault: () => gateway.listVaultEntries(),
     egressPending: () => config.egressPolicy?.pendingList() ?? [],
     egressAllow: (origin) => config.egressPolicy?.allow(origin),
     egressDeny: (origin) => config.egressPolicy?.deny(origin),
-  }, config.controlPlaneToken);
+  }, config.controlPlaneToken, config.replayArchivePath ? { replayArchivePath: config.replayArchivePath } : undefined);
   ref.control = control;
+
+  // Wire the kernel's consequential-action grant gate to the control-plane
+  // approval inbox. Built here (not at kernel construction) because the inbox
+  // lives inside the control plane, which is created after the kernel. Without
+  // this, every consequential page action is denied ("requires a configured
+  // grantHandler") and the operator Approvals queue never fills.
+  config.kernel.setGrantHandler(control.inbox.grantHandler);
 
   return { gateway, control };
 }

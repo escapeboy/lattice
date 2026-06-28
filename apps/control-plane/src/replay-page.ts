@@ -44,14 +44,24 @@ function rowFor(e: TraceEvent, t0: number): TraceEventRow {
 
 export function buildReplayPage(trace: SessionTrace): string {
   const t0 = trace.startTs;
-  const rows = trace.events
-    .map((e) => rowFor(e, t0))
+  const rows = trace.events.map((e) => rowFor(e, t0));
+  return renderReplayHtml(trace.traceId, trace.sessionId, rows, trace.endTs - trace.startTs);
+}
+
+/** Build the replay HTML from already-projected rows (a restored archive trace,
+ *  where the full SessionTrace is no longer in memory). */
+export function buildReplayPageFromRows(traceId: string, sessionId: string, rows: TraceEventRow[]): string {
+  const durationMs = rows.length ? rows[rows.length - 1]!.rel : 0;
+  return renderReplayHtml(traceId, sessionId, rows, durationMs);
+}
+
+function renderReplayHtml(traceId: string, sessionId: string, rows: TraceEventRow[], durationMs: number): string {
+  const body = rows
     .map((r) => `<tr class="${r.cls}"><td class="t">+${r.rel}ms</td><td class="lane ${r.lane}">${r.lane}</td><td>${r.text}</td></tr>`)
     .join("");
-
   return `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Replay · ${esc(trace.traceId.slice(0, 8))}</title>
+<title>Replay · ${esc(traceId.slice(0, 8))}</title>
 <style>
   body{font:14px ui-monospace,monospace;margin:0;background:#0f1115;color:#e6e6e6}
   header{padding:16px 20px;border-bottom:1px solid #2a2f3a}
@@ -64,9 +74,9 @@ export function buildReplayPage(trace: SessionTrace): string {
   tr.fail td{color:#f87171}tr.ok td:last-child{color:#86efac}tr.delta td:last-child{color:#93c5fd}
 </style></head><body>
   <header>
-    <h1>Session replay — ${esc(trace.traceId)}</h1>
-    <div class="sub">session ${esc(trace.sessionId)} · ${trace.events.length} events · ${trace.endTs - trace.startTs}ms · perceive vs act vs gate</div>
+    <h1>Session replay — ${esc(traceId)}</h1>
+    <div class="sub">session ${esc(sessionId)} · ${rows.length} events · ${durationMs}ms · perceive vs act vs gate</div>
   </header>
-  <table><tbody>${rows}</tbody></table>
+  <table><tbody>${body}</tbody></table>
 </body></html>`;
 }

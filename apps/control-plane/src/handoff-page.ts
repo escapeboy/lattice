@@ -31,14 +31,12 @@ export function buildHandoffPage(h: HandoffView): string {
          <p class="origin">${esc(h.origin)}</p>
          <label>${esc(h.field ?? "value")}</label>
          <input id="val" type="password" autocomplete="one-time-code" />
-         <input id="node" placeholder="field node id" />
-         <input id="sid" placeholder="session id" />
          <button class="approve" onclick="submitInput()">Send to form</button>
          <script>
            async function submitInput() {
              await fetch(location.pathname + '/claim', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deviceId:'web'})});
              const r = await fetch(location.pathname + '/input', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({
-               deviceId:'web', sessionId:document.getElementById('sid').value, fieldNodeId:document.getElementById('node').value, value:document.getElementById('val').value
+               deviceId:'web', value:document.getElementById('val').value
              })});
              document.getElementById('val').value='';
              document.getElementById('status').textContent = (await r.json()).filled ? 'Filled ✓' : 'Failed';

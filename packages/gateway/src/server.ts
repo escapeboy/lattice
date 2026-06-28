@@ -186,8 +186,14 @@ const TOOLS = [
   },
   {
     name: "vault_list",
-    description: "List stored credentials (id, label, origin, username — no passwords)",
-    inputSchema: { type: "object" as const, properties: {} },
+    description: "List credentials available for autofill (id, label, origin, username — no passwords). Pass `sessionId` (or `origin`) to get the credentials matching the current page — REQUIRED when 1Password is connected, since the full vault can hold thousands of logins. Without a page filter, only the small set of locally-stored credentials is returned plus a summary of how many 1Password logins exist.",
+    inputSchema: {
+      type: "object" as const,
+      properties: {
+        sessionId: { type: "string", description: "Filter to credentials usable on this session's current page." },
+        origin: { type: "string", description: "Filter to credentials for this origin (e.g. https://github.com)." },
+      },
+    },
   },
   {
     name: "vault_autofill",
@@ -347,6 +353,7 @@ const TOOLS = [
         type: { type: "string", enum: ["approval", "input"], default: "approval" },
         reason: { type: "string" },
         field: { type: "string", description: "For input handoffs: which field the human is asked to provide" },
+        fieldNodeId: { type: "string", description: "For input handoffs: the perception nodeId to fill the value into (so the operator only supplies the value)" },
         ttlMs: { type: "number" },
       },
       required: ["sessionId", "reason"],
@@ -431,6 +438,9 @@ export class GatewayServer {
   private readonly observer: GatewayObserver;
   /** Per-session action counter, for the theater view. */
   private readonly actionCounts = new Map<string, number>();
+  // Last observed page url per session — the build-on context doesn't track it,
+  // so we capture it from navigate/perceive to keep Theater's url accurate.
+  private readonly lastUrls = new Map<string, string>();
   private httpServer: HttpServer | null = null;
   /** Live MCP transports keyed by mcp-session-id (one per connected agent). */
   private readonly mcpTransports = new Map<string, StreamableHTTPServerTransport>();
@@ -474,13 +484,18 @@ export class GatewayServer {
   }
 
   /** Emit a theater view for a session (current url + action count). */
-  private emitSession(sessionId: string, extra?: { nodeCount?: number; lastSnapshotAt?: number }): void {
+  private emitSession(sessionId: string, extra?: { nodeCount?: number; lastSnapshotAt?: number; url?: string }): void {
     if (!this.observer.onSession) return;
     const session = this.sessions.get(sessionId);
     if (!session) { this.observer.onSession(sessionId, null); return; }
+    // Prefer the freshly observed url (navigate/perceive); the session context's
+    // currentUrl() is "" in the build-on path, which left Theater showing
+    // "about:blank" for every live session.
+    const url = extra?.url ?? (this.lastUrls.get(sessionId) ?? session.context.currentUrl());
+    if (extra?.url) this.lastUrls.set(sessionId, extra.url);
     this.observer.onSession(sessionId, {
       sessionId,
-      url: session.context.currentUrl(),
+      url,
       actionCount: this.actionCounts.get(sessionId) ?? 0,
       ...(extra?.nodeCount !== undefined ? { nodeCount: extra.nodeCount } : {}),
       ...(extra?.lastSnapshotAt !== undefined ? { lastSnapshotAt: extra.lastSnapshotAt } : {}),
@@ -566,9 +581,45 @@ export class GatewayServer {
     return this.sessions.listPersonas();
   }
 
-  /** Operator read surface: vault entries as id/origin/label ONLY — never username/password. */
-  listVaultEntries(): Array<{ id: string; origin: string; label: string }> {
-    return this.vault.listPublic().map((e) => ({ id: e.id, origin: e.origin, label: e.label }));
+  /**
+   * Operator read surface: stored vault entries as id/origin/label/source ONLY
+   * — never username/password. Excludes connected providers' logins (a manager
+   * can hold thousands); the operator sees per-provider counts via
+   * `providerStatus`, the agent discovers them per-page via the `vault_list` tool.
+   */
+  listVaultEntries(): Array<{ id: string; origin: string; label: string; source: string }> {
+    return this.vault.listPublic()
+      .map((e) => ({ id: e.id, origin: e.origin, label: e.label, source: e.source }));
+  }
+
+  /**
+   * Store a credential directly in the local encrypted vault (operator-entered).
+   * The value is sealed with the Keychain-held key and never reaches the model;
+   * the agent autofills it by id, origin-bound to the page (A5). This is the
+   * universal path that needs no external password manager.
+   */
+  storeVaultCredential(label: string, origin: string, username: string, password: string): { id: string } {
+    if (!origin || !password) throw new Error("origin and password are required");
+    return this.vault.store(label || origin, origin, username, password);
+  }
+
+  /**
+   * Connect a credential provider (1Password / Bitwarden / Apple Keychain) as a
+   * source — its logins become autofillable, matched by the item's own origin
+   * (A5), with no per-item linking. Secrets resolve only at autofill, gated by
+   * the provider's own unlock; values never reach the model.
+   */
+  connectProvider(id: string, opts?: { scope?: string; session?: string }): { logins: number } {
+    return this.vault.connectProvider(id, opts);
+  }
+
+  disconnectProvider(id: string): void {
+    this.vault.disconnectProvider(id);
+  }
+
+  /** Per-provider availability + connection status, for the operator UI. */
+  providerStatus(): ReturnType<Vault["providerStatus"]> {
+    return this.vault.providerStatus();
   }
 
   /**
@@ -576,14 +627,14 @@ export class GatewayServer {
    * into the claimed session's field. The value flows here → form and is never
    * retained or logged — the human channel sources it (Vault/PWA), not the agent.
    */
-  submitHandoffInput(
-    handoffId: string,
-    deviceId: string,
-    sessionId: string,
-    fieldNodeId: string,
-    value: string,
-  ): Promise<boolean> {
-    const session = this.getSession(sessionId);
+  submitHandoffInput(handoffId: string, deviceId: string, value: string): Promise<boolean> {
+    // Resolve the target session + field from the STORED handoff — the agent
+    // recorded both at raise time, so the operator only supplies the value and
+    // never needs to know node/session ids.
+    const req = this.handoff.get(handoffId);
+    if (!req || !req.fieldNodeId) return Promise.resolve(false);
+    const session = this.getSession(req.sessionId);
+    const fieldNodeId = req.fieldNodeId;
     return this.handoff.submitInput(handoffId, deviceId, value, (v) =>
       session.action.execute({ type: "fill", target: { nodeId: fieldNodeId as never }, value: v }).then(() => undefined),
     );
@@ -628,6 +679,7 @@ export class GatewayServer {
         const sessionId = a["sessionId"] as string;
         const trace = await this.sessions.destroy(sessionId);
         this.actionCounts.delete(sessionId);
+        this.lastUrls.delete(sessionId);
         if (this.observer.onSession) this.observer.onSession(sessionId, null);
         if (trace && this.observer.onTrace) this.observer.onTrace(trace);
         return ok({ destroyed: true });
@@ -654,7 +706,7 @@ export class GatewayServer {
         session.lastSnapshot = ig;
 
         session.recorder.recordSnapshot(ig.tier, ig.url, ig.title ?? "", nodes);
-        this.emitSession(session.id, { nodeCount: nodes.length, lastSnapshotAt: Date.now() });
+        this.emitSession(session.id, { nodeCount: nodes.length, lastSnapshotAt: Date.now(), url: ig.url });
         const d = prev ? session.perception.delta(prev, ig) : null;
         if (d) session.recorder.recordDelta(d.added.length, d.removed.length, d.updated.length, ig.url);
 
@@ -760,7 +812,7 @@ export class GatewayServer {
             return err(`origin_out_of_scope: the action navigated to ${landedUrl}, outside the task's allowed origins`);
           }
           session.recorder.recordActionResult(result.success, result.url, result.extracted);
-          this.emitSession(session.id);
+          this.emitSession(session.id, result.url ? { url: result.url } : undefined);
           return ok({
             success: result.success,
             url: result.url,
@@ -831,7 +883,22 @@ export class GatewayServer {
         return this.dispatchOperatorWrite(name, a);
 
       case "vault_list": {
-        return ok({ credentials: this.vault.listPublic() });
+        // Resolve an origin filter from an explicit origin or the session's page.
+        const explicitOrigin = a["origin"] as string | undefined;
+        const sid = a["sessionId"] as string | undefined;
+        const origin = explicitOrigin
+          ?? (sid ? originOf(this.getSession(sid).context.currentUrl()) ?? undefined : undefined);
+        if (origin) {
+          return ok({ credentials: this.vault.findByOrigin(origin), matchedOrigin: origin });
+        }
+        // No page filter: return only stored credentials (few). Don't dump
+        // connected managers — they can hold thousands of logins.
+        const connected = this.vault.providerStatus().filter((p) => p.connected);
+        return ok({
+          credentials: this.vault.listPublic(),
+          providers: connected.map((p) => ({ id: p.id, label: p.label, logins: p.logins })),
+          ...(connected.length ? { note: "pass `sessionId` or `origin` to vault_list to get the connected managers' logins for that page" } : {}),
+        });
       }
 
       case "vault_autofill": {
@@ -975,6 +1042,7 @@ export class GatewayServer {
             origin: session.context.currentUrl(),
             reason: a["reason"] as string,
             ...(typeof a["field"] === "string" ? { field: a["field"] } : {}),
+            ...(typeof a["fieldNodeId"] === "string" ? { fieldNodeId: a["fieldNodeId"] } : {}),
             ...(typeof a["ttlMs"] === "number" ? { ttlMs: a["ttlMs"] } : {}),
           },
           this.operatorStore.verifiedDevices(),
