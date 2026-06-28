@@ -59,6 +59,21 @@ const ROLE_MAP: Record<string, NodeRole> = {
   menuitem: "menuitem",
   img: "image",
   image: "image",
+  // Structural / content roles (smoke gap #1b) — non-interactive, so they appear
+  // on L2 (full content) but are filtered out of L1. Table/grid cells, docs
+  // prose/code, and iframe boundaries were previously dropped silently (up to
+  // ~28% of nodes on table-heavy pages; iframe = consent/payment frames).
+  table: "table",
+  grid: "table",
+  row: "row",
+  cell: "cell",
+  gridcell: "cell",
+  columnheader: "cell",
+  rowheader: "cell",
+  article: "article",
+  code: "code",
+  paragraph: "text",
+  iframe: "iframe",
 };
 
 const INTERACTIVE_ROLES: ReadonlySet<NodeRole> = new Set<NodeRole>([

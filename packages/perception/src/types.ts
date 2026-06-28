@@ -26,6 +26,16 @@ export type NodeRole =
   | "menu"
   | "menuitem"
   | "image"
+  // Structural / content roles (smoke gap #1b). Non-interactive → surface on L2
+  // only, so L1 token economy is unchanged. Carry table data, docs prose/code,
+  // and — security-relevant — iframe boundaries (consent / payment frames).
+  | "table"
+  | "row"
+  | "cell"
+  | "article"
+  | "code"
+  | "text"
+  | "iframe"
   | "generic";
 
 export interface NodeGeometry {
