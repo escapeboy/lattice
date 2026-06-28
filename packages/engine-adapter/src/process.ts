@@ -75,14 +75,27 @@ export class AgentBrowserProcess implements AbRunner {
 
   constructor(opts: ProcessOptions = {}) {
     this.binary = opts.binaryPath ?? resolveAgentBrowserBinary();
-    this.baseFlags = opts.baseFlags ?? [];
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.proxyUrl = opts.proxyUrl;
+    // Egress firewall: route the browser through the Lattice forward proxy via
+    // agent-browser's `--proxy` GLOBAL flag — which maps to Playwright's proxy
+    // launch option and DOES tunnel HTTPS CONNECT through our proxy (verified
+    // live: a deny-all proxy receives the CONNECT for an https:// host and the
+    // navigation fails with ERR_TUNNEL_CONNECTION_FAILED). The earlier env-var
+    // approach (HTTP_PROXY/HTTPS_PROXY) did NOT gate HTTPS — that was the real
+    // cause of the "HTTPS egress not contained" gap, not a Chromium limitation.
+    // `--proxy-bypass` keeps loopback (the daemon's own control IPC) off-proxy.
+    // These are OUR flags (not agent-supplied), prepended to the global section,
+    // so they precede the subcommand and never reach the arg firewall.
+    const proxyFlags = opts.proxyUrl
+      ? ["--proxy", opts.proxyUrl, "--proxy-bypass", "127.0.0.1,localhost"]
+      : [];
+    this.baseFlags = [...(opts.baseFlags ?? []), ...proxyFlags];
   }
 
   async run(session: string, subcommand: string, args: readonly string[] = []): Promise<AbEnvelope> {
     assertNotFirewalled(subcommand, args);
-    // Global flags first (--session/--headed), then subcommand + its args, then --json.
+    // Global flags first (--session/--headed/--proxy), then subcommand + its args, then --json.
     const argv = ["--session", session, ...this.baseFlags, subcommand, ...args, "--json"];
     const stdout = await this.exec(argv);
     return parseEnvelope(stdout);
@@ -92,16 +105,6 @@ export class AgentBrowserProcess implements AbRunner {
     return new Promise((resolve, reject) => {
       const child = spawn(this.binary, argv as string[], {
         stdio: ["ignore", "pipe", "pipe"],
-        // Egress firewall: route the browser's traffic through the Lattice proxy.
-        // NO_PROXY for loopback keeps the agent-browser daemon's own control IPC
-        // (and any localhost target) off the proxy; real egress still goes through.
-        // KNOWN LIMITATION: agent-browser/Chromium only routes HTTP through this
-        // proxy, not HTTPS (env vars AND --proxy/--proxy-server flags all fail to
-        // gate HTTPS CONNECT — verified). HTTPS egress is gated at the kernel
-        // (navigation scope) only; sub-resource HTTPS egress is NOT proxy-gated.
-        ...(this.proxyUrl
-          ? { env: { ...process.env, HTTP_PROXY: this.proxyUrl, HTTPS_PROXY: this.proxyUrl, NO_PROXY: "127.0.0.1,localhost" } }
-          : {}),
       });
       let out = "";
       let err = "";

@@ -51,7 +51,7 @@ describe("governance eval — real kernel/firewall adjudication", () => {
     expect(text).toContain("block rate");
   });
 
-  it("DEFAULT-DEPLOYMENT view: honest wired count against `docker compose up` (18 zero-config, 20 configured of 22)", () => {
+  it("DEFAULT-DEPLOYMENT view: honest wired count against `docker compose up` (18 zero-config, 22 configured of 22)", () => {
     const r = runGovernanceEval();
     expect(r.total).toBe(22);
     // The kernel blocks the whole corpus at the function level.
@@ -62,38 +62,36 @@ describe("governance eval — real kernel/firewall adjudication", () => {
       "exfil-form-to-attacker-http", "exfil-form-to-attacker-https",
       "exfil-img-beacon-http", "exfil-img-beacon-https",
     ]);
-    // Allowlist starts the proxy → HTTP egress wired, but HTTPS egress is NOT:
-    // 20/22, NOT a full 22. This is the honest correction.
-    expect(r.wiredConfigured).toBe(20);
-    expect(r.wiredConfigured).not.toBe(r.total);
+    // Allowlist starts the proxy → egress wired for BOTH HTTP and HTTPS (the proxy
+    // tunnels HTTPS CONNECT via the --proxy flag, verified live) → full 22/22.
+    expect(r.wiredConfigured).toBe(22);
+    expect(r.wiredConfigured).toBe(r.total);
   });
 
-  it("HONEST: HTTPS egress-exfil stays UNWIRED even with an allowlist (proxy gates HTTP only)", () => {
+  it("HTTPS egress-exfil IS now wired with an allowlist (proxy tunnels HTTPS CONNECT)", () => {
     const r = runGovernanceEval();
-    // The two HTTPS vectors are blocked by checkEgress LOGIC but never reach the
-    // real path — the proxy doesn't see HTTPS. This pin prevents regression to a
-    // false "fully wired" claim until app-level HTTPS gating lands.
-    expect([...r.unwiredHttpsEgress].sort()).toEqual([
-      "exfil-form-to-attacker-https", "exfil-img-beacon-https",
-    ]);
-    expect(formatGovernanceReport(r)).toContain("HTTPS egress NOT wired");
+    // Regression guard: HTTPS egress-exfil must stay wired (gated by destination
+    // origin at the CONNECT tunnel). If this breaks, the --proxy wiring regressed.
+    expect([...r.unwiredHttpsEgress]).toEqual([]);
+    expect(formatGovernanceReport(r)).toContain("HTTPS egress IS wired");
   });
 
-  it("escape-hatch wiring depends on build-on; egress on allowlist AND HTTP transport", () => {
-    // 14 kernel + 4 escape-hatch + 2 HTTP egress-exfil = 20 (of 22). The 2 HTTPS
-    // egress-exfil are never wired. cdp exposes eval/raw-CDP/file → escape-hatch unwired.
+  it("escape-hatch wiring depends on build-on; egress wired iff an allowlist is configured", () => {
+    // 14 kernel + 4 escape-hatch + 4 egress-exfil (HTTP+HTTPS) = 22 (of 22) when
+    // configured. cdp exposes eval/raw-CDP/file → escape-hatch unwired (−4).
     expect(wiredCountFor({ engine: "cdp", egressAllowlistConfigured: false })).toBe(14);
-    expect(wiredCountFor({ engine: "cdp", egressAllowlistConfigured: true })).toBe(16);
+    expect(wiredCountFor({ engine: "cdp", egressAllowlistConfigured: true })).toBe(18);
     expect(wiredCountFor({ engine: "build-on", egressAllowlistConfigured: false })).toBe(18);
-    expect(wiredCountFor({ engine: "build-on", egressAllowlistConfigured: true })).toBe(20);
+    expect(wiredCountFor({ engine: "build-on", egressAllowlistConfigured: true })).toBe(22);
   });
 
-  it("DESKTOP default (ADR 0003 D6): proxy ON via first-run allowlist → 20/22 (HTTP egress wired, HTTPS NOT)", () => {
+  it("DESKTOP default: egress proxy ships OFF → same egress posture as zero-config (18/22)", () => {
     const r = runGovernanceEval();
-    // The desktop ships the proxy ON (guided first-run allowlist), closing the
-    // zero-config HTTP-egress hole. But the proxy gates HTTP only — the 2 HTTPS
-    // egress-exfil vectors stay unwired. So 20/22, NOT a full 22/22.
-    expect(wiredCountFor(DEPLOYMENT_DESKTOP)).toBe(20);
+    // The desktop app currently ships NO egress proxy (DesktopEgress.environment()
+    // returns no proxy; first-run UX removed). So app-level egress is not gated on
+    // desktop today → 18/22, like zero-config. Re-enabling is a pending posture
+    // decision (HTTPS gating is now viable via the --proxy flag).
+    expect(wiredCountFor(DEPLOYMENT_DESKTOP)).toBe(18);
     expect(wiredCountFor(DEPLOYMENT_DESKTOP)).not.toBe(r.total);
   });
 });
