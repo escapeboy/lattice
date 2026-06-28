@@ -149,6 +149,12 @@ public final class ControlPlaneModel: ObservableObject {
         chromeProfiles = (try? await client.chromeProfiles()) ?? []
     }
 
+    /// The agent system prompt (for the "Copy agent prompt" button); nil on failure.
+    public func agentPrompt() async -> String? {
+        let t = try? await client.agentPrompt()
+        return (t?.isEmpty == false) ? t : nil
+    }
+
     /// Load the known action-type catalog for the Policy picker (best-effort).
     public func loadActionCatalog() async {
         if let c = try? await client.actionCatalog(), !c.isEmpty { actionCatalog = c }

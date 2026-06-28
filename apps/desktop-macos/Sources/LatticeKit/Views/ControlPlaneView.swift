@@ -71,6 +71,7 @@ public struct ControlPlaneView: View {
     @ObservedObject var model: ControlPlaneModel
     let mcpClient: MCPClient?
     @State private var section: ControlPlaneSection = .theater
+    @State private var promptCopied = false
 
     public init(model: ControlPlaneModel, mcpClient: MCPClient?) {
         self.model = model
@@ -111,17 +112,39 @@ public struct ControlPlaneView: View {
     }
 
     private var statusBar: some View {
-        HStack(spacing: 6) {
-            Circle().fill(model.connected ? .green : .orange).frame(width: 7, height: 7)
-                .accessibilityHidden(true) // the adjacent text already states the status
-            Text(model.connected ? "Connected" : "Reconnecting…")
-                .font(.caption2).foregroundStyle(.secondary)
-            Spacer()
-            if !model.approvals.isEmpty {
-                Text("\(model.approvals.count) pending")
-                    .font(.caption2).foregroundStyle(.orange)
+        VStack(spacing: 6) {
+            Button(action: copyPrompt) {
+                Label(promptCopied ? "Prompt copied" : "Copy agent prompt",
+                      systemImage: promptCopied ? "checkmark.circle.fill" : "doc.on.doc")
+                    .font(.caption)
+                    .frame(maxWidth: .infinity)
+            }
+            .controlSize(.small)
+            .tint(promptCopied ? .green : nil)
+            .help("Copy the agent system prompt to paste into an LLM that drives Lattice")
+            HStack(spacing: 6) {
+                Circle().fill(model.connected ? .green : .orange).frame(width: 7, height: 7)
+                    .accessibilityHidden(true) // the adjacent text already states the status
+                Text(model.connected ? "Connected" : "Reconnecting…")
+                    .font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                if !model.approvals.isEmpty {
+                    Text("\(model.approvals.count) pending")
+                        .font(.caption2).foregroundStyle(.orange)
+                }
             }
         }
         .padding(.horizontal, 10).padding(.vertical, 6)
+    }
+
+    private func copyPrompt() {
+        Task {
+            guard let text = await model.agentPrompt() else { return }
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+            promptCopied = true
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            promptCopied = false
+        }
     }
 }

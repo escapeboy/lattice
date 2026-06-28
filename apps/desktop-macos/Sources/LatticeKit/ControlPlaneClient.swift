@@ -134,6 +134,11 @@ public struct ControlPlaneClient: Sendable {
         let sub = try JSONSerialization.data(withJSONObject: arr)
         return try JSONDecoder().decode([ActionCatalogEntry].self, from: sub)
     }
+    /// The agent system prompt (plain text) for the "Copy agent prompt" button.
+    public func agentPrompt() async throws -> String {
+        let (data, _) = try await send("GET", "/agent-prompt", body: nil)
+        return String(data: data, encoding: .utf8) ?? ""
+    }
     public func policy() async throws -> Policy {
         let (data, _) = try await send("GET", "/policy", body: nil)
         return try JSONDecoder().decode(Policy.self, from: data)
