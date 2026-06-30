@@ -187,6 +187,48 @@ describe("LatticeCore — engineKind selection (ADR 0002)", () => {
   });
 });
 
+describe("LatticeCore — control plane on the build-on path (option 3: stdio-mode CP)", () => {
+  it("a build-on session is visible in Theater LIVE, lands in Replay after destroy, all from ONE process; CP is token-gated", async () => {
+    const kernel = new SecurityKernelImpl({ allowedOrigins: [], egressAllowlist: [], prohibitedActions: [] });
+    const svodWrites: Array<{ path: string }> = [];
+    const core = createLatticeCore({
+      engineKind: "agent-browser",
+      buildOnEngine: new FakeBuildOnEngine(),
+      kernel,
+      controlPlaneToken: "secret-cp",
+      traceWriter: (path) => { svodWrites.push({ path }); return Promise.resolve(); },
+    });
+    // This is exactly what the stdio branch does: control.start on loopback.
+    const { url } = await core.control.start(0, "127.0.0.1");
+    const client = await connectGatewayClient(core);
+    try {
+      const { sessionId } = jsonOf(await client.callTool({ name: "session_create", arguments: {} })) as { sessionId: string };
+
+      // THEATER: the live session is visible via the SAME process's CP HTTP.
+      const live = await (await fetch(`${url}/sessions`)).json() as { sessions: Array<{ sessionId: string }> };
+      expect(live.sessions.some((s) => s.sessionId === sessionId)).toBe(true);
+
+      // SECURE-BY-DEFAULT: a token-gated (PII) route is 401 without the token, 200 with it.
+      expect((await fetch(`${url}/replay`)).status).toBe(401);
+      expect((await fetch(`${url}/replay`, { headers: { Authorization: "Bearer secret-cp" } })).status).toBe(200);
+
+      // REPLAY: after destroy, the session's trace is served by the SAME process,
+      // and the durable Svod-note sink also fired.
+      await client.callTool({ name: "session_destroy", arguments: { sessionId } });
+      const replay = await (await fetch(`${url}/traces`)).json() as { traces: Array<{ sessionId: string }> };
+      expect(replay.traces.some((t) => t.sessionId === sessionId)).toBe(true);
+      expect(svodWrites.length).toBe(1);
+      // The live theater dropped it on teardown (it's now a recently-ended/replay item).
+      const after = await (await fetch(`${url}/sessions`)).json() as { sessions: Array<{ sessionId: string }> };
+      expect(after.sessions.some((s) => s.sessionId === sessionId)).toBe(false);
+    } finally {
+      await client.close();
+      await core.gateway.stop();
+      await core.control.stop();
+    }
+  });
+});
+
 const exe = detectChromiumExecutable();
 const describeIfBrowser = exe ? describe : describe.skip;
 

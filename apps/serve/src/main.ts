@@ -243,12 +243,29 @@ async function main(): Promise<void> {
   }
 
   if (process.env["LATTICE_TRANSPORT"] === "stdio") {
-    // Stdio MCP (Claude Desktop / CLI): speak MCP over stdout, no HTTP port and
-    // no control-plane bind — mirrors the legacy gateway entry but on the
-    // build-on (governed, firewalled) engine. ALL logging stays on stderr so it
-    // can't corrupt the stdio protocol stream.
+    // Stdio MCP (Claude Desktop / CLI): speak MCP over stdout on the build-on
+    // (governed, firewalled) engine. ALL logging stays on stderr so it can't
+    // corrupt the stdio protocol stream.
     await gateway.startStdio();
     console.error("Lattice serve — MCP gateway on stdio (build-on)");
+    // Optional operator surface IN stdio mode: bring up the SAME control plane
+    // (Theater / approvals / Replay) on a loopback HTTP port, so the one process
+    // that drives the agent also shows its sessions live and its traces in Replay
+    // (one process drives AND displays). Opt-in via LATTICE_CP_PORT (unset = off,
+    // preserving the minimal stdio surface). SECURITY: bound to 127.0.0.1 ONLY and
+    // gated by the SAME cpToken as the desktop (auto-generated above if unset) —
+    // adding an HTTP surface re-introduces one that must carry the desktop's auth,
+    // never open (A2). A bind failure (e.g. port already taken by a running
+    // desktop) is non-fatal: the MCP keeps serving without the operator surface.
+    const stdioCpPort = Number(process.env["LATTICE_CP_PORT"] ?? 0);
+    if (Number.isInteger(stdioCpPort) && stdioCpPort > 0) {
+      try {
+        const { url: cpUrl } = await control.start(stdioCpPort, "127.0.0.1");
+        console.error(`Lattice serve — control plane: ${cpUrl} (loopback, token-gated; CP token: ${cpToken})`);
+      } catch (e) {
+        console.error(`Lattice serve — control plane failed to start on 127.0.0.1:${stdioCpPort} (${e instanceof Error ? e.message : String(e)}); MCP continues without the operator surface.`);
+      }
+    }
   } else {
     const { url: mcpUrl } = await gateway.startHttp(gwPort, gwHost);
     const { url: cpUrl } = await control.start(cpPort, "127.0.0.1");
