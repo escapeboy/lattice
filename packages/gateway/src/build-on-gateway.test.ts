@@ -261,4 +261,58 @@ live("build-on gateway — LIVE over real agent-browser (S6 DoD)", () => {
       await engine.shutdown();
     }
   }, 90_000);
+
+  // The regression this whole change fixes: a continuous-render WebGL page used to
+  // block ~4 min (until the hard SIGKILL) and then THROW. With the bounded settle
+  // it must resolve a LIVE result inside the budget, and perception must surface
+  // pixels (L3) so the canvas case is captured rather than perceived as empty.
+  it("aquarium (continuous-render WebGL): navigation is BOUNDED + degrades to a live L3 screenshot, never hangs", async () => {
+    const SETTLE_MS = 8_000;
+    // Hard backstop well above the settle budget — if bounded settle works we
+    // never get near it; if it regressed to a hang, the assertion below (elapsed)
+    // fails fast rather than waiting it out.
+    const engine = new AgentBrowserEngine({ settleBudgetMs: SETTLE_MS, timeoutMs: 30_000 });
+    await engine.launch();
+    const kernel = createSecurityKernel({ allowedOrigins: [], egressAllowlist: [], prohibitedActions: [] });
+    const gateway = createBuildOnGateway({ engine, kernel });
+    const [ct, st] = InMemoryTransport.createLinkedPair();
+    await gateway.getMCPServer().connect(st);
+    const client = new Client({ name: "live-aquarium", version: "0.0.1" });
+    await client.connect(ct);
+    try {
+      const { sessionId } = toolJson(await client.callTool({ name: "session_create", arguments: {} })) as { sessionId: string };
+
+      // (A) Navigation to the non-quiescing canvas returns within the bounded
+      // budget — NOT the ~4-min hang, NOT a throw.
+      const started = Date.now();
+      const nav = toolJson(await client.callTool({
+        name: "act_execute",
+        arguments: { sessionId, command: { type: "navigate", url: "https://webglsamples.org/aquarium/aquarium.html" } },
+      }));
+      const navMs = Date.now() - started;
+      expect(nav["success"]).toBe(true);
+      // Bounded: budget + the perceive-after + generous CI headroom, but FAR below
+      // the old multi-minute hang. (The page may settle fast → settled omitted, or
+      // not quiesce → settled:false; either way it must be bounded.)
+      expect(navMs).toBeLessThan(SETTLE_MS + 22_000);
+
+      // (B) Pixels are available — the case is captured, not blank. An explicit L3
+      // request always ships a screenshot; a continuous-render canvas also
+      // auto-escalates on a plain perceive (contentSparse), but we pin the
+      // deterministic path here.
+      const res = await client.callTool({ name: "perceive_snapshot", arguments: { sessionId, tier: "L3" } });
+      const items = (res as { content: Array<{ type: string; data?: string }> }).content;
+      const image = items.find((i) => i.type === "image");
+      expect(image).toBeTruthy();
+      expect((image!.data ?? "").length).toBeGreaterThan(0);
+
+      // (C) The session survived — still live and usable after the canvas.
+      const list = toolJson(await client.callTool({ name: "session_list", arguments: {} }));
+      expect(list["sessions"] as string[]).toContain(sessionId);
+    } finally {
+      await client.close();
+      await gateway.stop();
+      await engine.shutdown();
+    }
+  }, 90_000);
 });
