@@ -14,18 +14,29 @@ public struct TheaterView: View {
 
     public var body: some View {
         HSplitView {
-            List(model.sessions, selection: $selected) { s in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(s.url.isEmpty ? "about:blank" : s.url)
-                        .font(.callout).lineLimit(1).truncationMode(.middle)
-                    Text("\(s.actionCount) actions · \(s.sessionId.prefix(8))")
-                        .font(.caption2).foregroundStyle(.secondary)
-                }.tag(s.sessionId)
+            VStack(spacing: 0) {
+                List(model.sessions, selection: $selected) { s in
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(s.url.isEmpty ? "about:blank" : s.url)
+                            .font(.callout).lineLimit(1).truncationMode(.middle)
+                        Text("\(s.actionCount) actions · \(s.sessionId.prefix(8))")
+                            .font(.caption2).foregroundStyle(.secondary)
+                    }.tag(s.sessionId)
+                }
+                .overlay { if model.sessions.isEmpty {
+                    ContentUnavailableMessage("No active sessions", systemImage: "rectangle.3.group")
+                } }
+
+                // Recently-ended catch-up: an ephemeral create→act→destroy run
+                // drops off the live list at teardown, so without this an operator
+                // who opens Theater a beat later sees nothing. Display-only (the
+                // sessions are gone — no live feed), TTL-bounded by the server.
+                if !model.recentlyEnded.isEmpty {
+                    Divider()
+                    RecentlyEndedSection(items: model.recentlyEnded)
+                }
             }
             .frame(minWidth: 220)
-            .overlay { if model.sessions.isEmpty {
-                ContentUnavailableMessage("No active sessions", systemImage: "rectangle.3.group")
-            } }
 
             if let sid = selected {
                 LiveSessionView(sessionId: sid, mcpClient: mcpClient)
@@ -36,6 +47,42 @@ public struct TheaterView: View {
             }
         }
         .navigationTitle("Theater")
+    }
+}
+
+/// Display-only list of sessions that ended within the server's TTL — Theater
+/// catch-up so a just-finished ephemeral run is still visible for a moment.
+struct RecentlyEndedSection: View {
+    let items: [RecentlyEndedSession]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Recently ended")
+                .font(.caption2).fontWeight(.semibold).foregroundStyle(.secondary)
+                .padding(.horizontal, 8).padding(.top, 6)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 2) {
+                    ForEach(items) { s in
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(s.url.isEmpty ? "about:blank" : s.url)
+                                .font(.caption).lineLimit(1).truncationMode(.middle)
+                            Text("\(s.actionCount) actions · ended \(Self.ago(s.endedAt)) · \(s.sessionId.prefix(8))")
+                                .font(.caption2).foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 8).padding(.vertical, 2)
+                    }
+                }
+            }
+            .frame(maxHeight: 120)
+        }
+        .opacity(0.7)
+    }
+
+    /// "12s ago" / "1m ago" from an epoch-ms timestamp.
+    static func ago(_ endedAtMs: Double) -> String {
+        let secs = max(0, Int(Date().timeIntervalSince1970 - endedAtMs / 1000))
+        return secs < 60 ? "\(secs)s ago" : "\(secs / 60)m ago"
     }
 }
 

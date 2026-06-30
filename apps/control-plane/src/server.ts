@@ -26,7 +26,7 @@ import { buildUI } from "./ui.js";
 import { AGENT_PROMPT } from "./agent-prompt.js";
 import { buildHandoffPage } from "./handoff-page.js";
 import { buildReplayPage, buildReplayPageFromRows, traceEventRows, type TraceEventRow } from "./replay-page.js";
-import type { ControlPlaneBackend, PolicyConfig, SessionView } from "./types.js";
+import type { ControlPlaneBackend, PolicyConfig, RecentlyEndedSession, SessionView } from "./types.js";
 import type { SessionTrace } from "@lattice/observability";
 import { extractMetrics } from "@lattice/observability";
 import { actionCatalog } from "@lattice/kernel";
@@ -44,6 +44,16 @@ export class ControlPlaneServer {
   private server: Server | null = null;
   private readonly sseClients = new Set<ServerResponse>();
   private readonly sessions = new Map<string, SessionView>();
+  /**
+   * Catch-up buffer for the Theater: sessions that ended in the last
+   * {@link recentlyEndedTtlMs}, newest-first, capped at {@link RECENTLY_ENDED_CAP}.
+   * Lets an operator who opens Theater a moment after an ephemeral
+   * create→act→destroy run still see it, instead of an empty list. In-memory
+   * only, TTL-pruned — NOT the durable (redacted, Svod) trace store.
+   */
+  private readonly recentlyEnded: RecentlyEndedSession[] = [];
+  private static readonly RECENTLY_ENDED_CAP = 20;
+  private readonly recentlyEndedTtlMs: number;
   private readonly traces: TraceMetricsSummary[] = [];
   /**
    * Full, un-redacted traces for the operator's replay viewer.
@@ -75,13 +85,14 @@ export class ControlPlaneServer {
   private readonly authToken: string | null;
   private readonly replayArchivePath: string | null;
 
-  constructor(initial?: Partial<PolicyConfig>, backend?: ControlPlaneBackend, authToken?: string, options?: { replayArchivePath?: string }) {
+  constructor(initial?: Partial<PolicyConfig>, backend?: ControlPlaneBackend, authToken?: string, options?: { replayArchivePath?: string; recentlyEndedTtlMs?: number }) {
     this.inbox = new ApprovalInbox();
     this.policy = new PolicyEditor(initial);
     this.backend = backend ?? null;
     this.authToken = authToken ?? null;
     this.grants = backend ? new OperatorGrantInbox(backend.kernel) : null;
     this.replayArchivePath = options?.replayArchivePath ?? null;
+    this.recentlyEndedTtlMs = options?.recentlyEndedTtlMs ?? 60_000;
     this.loadReplayArchive();
 
     // Forward approval queue changes to SSE clients
@@ -129,10 +140,28 @@ export class ControlPlaneServer {
     this.broadcast({ type: "sessions", data: Array.from(this.sessions.values()) });
   }
 
-  /** Remove a session from the theater. */
+  /** Remove a session from the theater, keeping a short-lived "recently ended"
+   *  echo so an operator who opens Theater right after teardown still sees it. */
   removeSession(sessionId: string): void {
+    const view = this.sessions.get(sessionId);
     this.sessions.delete(sessionId);
+    if (view) {
+      this.recentlyEnded.unshift({ ...view, endedAt: Date.now() });
+      if (this.recentlyEnded.length > ControlPlaneServer.RECENTLY_ENDED_CAP) {
+        this.recentlyEnded.length = ControlPlaneServer.RECENTLY_ENDED_CAP;
+      }
+    }
     this.broadcast({ type: "sessions", data: Array.from(this.sessions.values()) });
+  }
+
+  /** Drop expired recently-ended entries (older than the TTL) and return the
+   *  fresh ones, newest-first. Lazy prune on read keeps it self-bounding. */
+  private freshRecentlyEnded(): RecentlyEndedSession[] {
+    const cutoff = Date.now() - this.recentlyEndedTtlMs;
+    for (let i = this.recentlyEnded.length - 1; i >= 0; i--) {
+      if (this.recentlyEnded[i]!.endedAt < cutoff) this.recentlyEnded.splice(i, 1);
+    }
+    return this.recentlyEnded;
   }
 
   /** Submit a completed trace for the replay browser. */
@@ -235,7 +264,7 @@ export class ControlPlaneServer {
     }
 
     if (method === "GET" && path === "/sessions") {
-      json(res, { sessions: Array.from(this.sessions.values()) });
+      json(res, { sessions: Array.from(this.sessions.values()), recentlyEnded: this.freshRecentlyEnded() });
       return;
     }
 

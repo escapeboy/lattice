@@ -225,9 +225,15 @@ describeIfBrowser("LatticeCore — live theater + handoff (browser)", () => {
       expect(status["status"]).toBe("approved");
 
       await client.callTool({ name: "session_destroy", arguments: { sessionId } });
-      // Session left the theater.
-      const after = await (await fetch(`${url}/sessions`)).json() as { sessions: Array<{ sessionId: string }> };
+      // Session left the LIVE theater but is kept briefly in recently-ended, so an
+      // operator who opens Theater right after teardown still sees the run (the
+      // create→act→destroy visibility gap).
+      const after = await (await fetch(`${url}/sessions`)).json() as {
+        sessions: Array<{ sessionId: string }>;
+        recentlyEnded: Array<{ sessionId: string; endedAt: number }>;
+      };
       expect(after.sessions.some((s) => s.sessionId === sessionId)).toBe(false);
+      expect(after.recentlyEnded.some((s) => s.sessionId === sessionId)).toBe(true);
     } finally {
       await client.close();
       await core.gateway.stop();

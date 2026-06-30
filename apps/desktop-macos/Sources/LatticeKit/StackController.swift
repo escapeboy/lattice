@@ -28,6 +28,11 @@ public final class StackController: ObservableObject {
     /// Human handoffs the agent raised at a wall (login / 2FA / confirm) awaiting
     /// the operator. Also drives the menubar attention indicator.
     @Published public internal(set) var pendingHandoffs: Int = 0
+    /// Live agent sessions right now. Polled by the always-on alert poll (below)
+    /// so "N live sessions" is visible in the menubar even when the Theater window
+    /// is CLOSED — the full ControlPlaneModel only polls while its window is open,
+    /// which is exactly why an agent-driven session was invisible to the operator.
+    @Published public internal(set) var liveSessions: Int = 0
     /// Total things needing the operator (approvals + handoffs).
     public var needsAttention: Int { pendingApprovals + pendingHandoffs }
 
@@ -115,6 +120,11 @@ public final class StackController: ObservableObject {
                     self?.handoffNotifier.sync(handoffs: handoffs)
                     self?.pendingHandoffs = handoffs.filter { $0.status == "pending" }.count
                 }
+                // "N live sessions" badge — runs regardless of window state, so a
+                // running agent is visible even with the Theater closed.
+                if let live = try? await client.sessions() {
+                    self?.liveSessions = live.count
+                }
                 try? await Task.sleep(nanoseconds: 2_000_000_000)
             }
         }
@@ -125,6 +135,7 @@ public final class StackController: ObservableObject {
         alertPollTask = nil
         pendingApprovals = 0
         pendingHandoffs = 0
+        liveSessions = 0
     }
 
     // Desktop egress is OFF by default (no guided first-run): the app-level proxy

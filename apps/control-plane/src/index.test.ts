@@ -530,3 +530,67 @@ describe("ControlPlaneServer — HTTP API", () => {
     expect(data.intent).toBe("fill the login form");
   });
 });
+
+// ── Theater visibility: live count (the "N live" source) + recently-ended catch-up ─
+
+describe("ControlPlaneServer — Theater visibility", () => {
+  type SessionsBody = {
+    sessions: Array<{ sessionId: string; actionCount: number }>;
+    recentlyEnded: Array<{ sessionId: string; actionCount: number; endedAt: number }>;
+  };
+
+  it("a live session is in /sessions (the N-live source); on teardown it moves to recentlyEnded within TTL", async () => {
+    const server = new ControlPlaneServer(undefined, undefined, undefined, { recentlyEndedTtlMs: 60_000 });
+    const { url } = await server.start(0, "127.0.0.1");
+    try {
+      // create→act: a live session the always-on poll counts for the badge.
+      server.updateSession({ sessionId: "s1", url: "https://app.example.com/", actionCount: 3 });
+      let body = await (await fetch(`${url}/sessions`)).json() as SessionsBody;
+      expect(body.sessions.map((s) => s.sessionId)).toEqual(["s1"]); // "N live" = 1
+      expect(body.recentlyEnded).toEqual([]);
+
+      // destroy: drops from live, but stays as a recently-ended catch-up.
+      server.removeSession("s1");
+      body = await (await fetch(`${url}/sessions`)).json() as SessionsBody;
+      expect(body.sessions).toEqual([]);                                   // "N live" = 0
+      expect(body.recentlyEnded.map((s) => s.sessionId)).toEqual(["s1"]);  // still visible
+      expect(body.recentlyEnded[0]!.actionCount).toBe(3);
+      expect(body.recentlyEnded[0]!.endedAt).toBeGreaterThan(0);
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("recently-ended entries expire after the TTL (short-lived, self-pruning)", async () => {
+    const server = new ControlPlaneServer(undefined, undefined, undefined, { recentlyEndedTtlMs: 40 });
+    const { url } = await server.start(0, "127.0.0.1");
+    try {
+      server.updateSession({ sessionId: "s2", url: "https://x/", actionCount: 1 });
+      server.removeSession("s2");
+      let body = await (await fetch(`${url}/sessions`)).json() as SessionsBody;
+      expect(body.recentlyEnded.map((s) => s.sessionId)).toEqual(["s2"]);  // within TTL
+
+      await new Promise((r) => setTimeout(r, 80));                          // past TTL
+      body = await (await fetch(`${url}/sessions`)).json() as SessionsBody;
+      expect(body.recentlyEnded).toEqual([]);                              // pruned
+    } finally {
+      await server.stop();
+    }
+  });
+
+  it("recently-ended is capped (newest-first, bounded buffer)", async () => {
+    const server = new ControlPlaneServer(undefined, undefined, undefined, { recentlyEndedTtlMs: 60_000 });
+    const { url } = await server.start(0, "127.0.0.1");
+    try {
+      for (let i = 0; i < 25; i++) {
+        server.updateSession({ sessionId: `s${i}`, url: "https://x/", actionCount: i });
+        server.removeSession(`s${i}`);
+      }
+      const body = await (await fetch(`${url}/sessions`)).json() as SessionsBody;
+      expect(body.recentlyEnded.length).toBe(20);          // capped
+      expect(body.recentlyEnded[0]!.sessionId).toBe("s24"); // newest first
+    } finally {
+      await server.stop();
+    }
+  });
+});

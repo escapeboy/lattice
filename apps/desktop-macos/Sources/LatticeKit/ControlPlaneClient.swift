@@ -9,6 +9,23 @@ public struct SessionView: Codable, Sendable, Identifiable {
     public var id: String { sessionId }
 }
 
+/// A session that ended recently — the Theater's short-lived catch-up so an
+/// ephemeral create→act→destroy run isn't invisible to an operator who opens
+/// the window a moment after teardown. TTL-pruned on the server; no PII.
+public struct RecentlyEndedSession: Codable, Sendable, Identifiable {
+    public let sessionId: String
+    public let url: String
+    public let actionCount: Int
+    public let endedAt: Double
+    public var id: String { sessionId }
+}
+
+/// One read of /sessions: the live sessions plus the recently-ended catch-up.
+public struct SessionsSnapshot: Sendable {
+    public let live: [SessionView]
+    public let recentlyEnded: [RecentlyEndedSession]
+}
+
 public struct Approval: Codable, Sendable, Identifiable {
     public let id: String
     public let sessionId: String
@@ -119,6 +136,17 @@ public struct ControlPlaneClient: Sendable {
 
     public func sessions() async throws -> [SessionView] {
         try await get("/sessions", "sessions")
+    }
+    /// Live sessions + the recently-ended catch-up, from ONE /sessions read.
+    public func sessionsSnapshot() async throws -> SessionsSnapshot {
+        let (data, _) = try await send("GET", "/sessions", body: nil)
+        let obj = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        func decode<T: Decodable>(_ key: String) throws -> [T] {
+            guard let arr = obj?[key] else { return [] }
+            let sub = try JSONSerialization.data(withJSONObject: arr)
+            return try JSONDecoder().decode([T].self, from: sub)
+        }
+        return SessionsSnapshot(live: try decode("sessions"), recentlyEnded: try decode("recentlyEnded"))
     }
     public func approvals() async throws -> [Approval] {
         try await get("/approvals", "approvals")

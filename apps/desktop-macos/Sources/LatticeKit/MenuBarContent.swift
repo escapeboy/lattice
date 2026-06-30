@@ -32,6 +32,13 @@ public struct MenuBarContent: View {
                 Text(statusText).font(.caption)
             }
 
+            if isRunning {
+                Label("\(stack.liveSessions) live session\(stack.liveSessions == 1 ? "" : "s")",
+                      systemImage: "rectangle.3.group")
+                    .font(.caption)
+                    .foregroundStyle(stack.liveSessions > 0 ? .primary : .secondary)
+            }
+
             if stack.needsAttention > 0 {
                 Button {
                     onOpenControlPlane()

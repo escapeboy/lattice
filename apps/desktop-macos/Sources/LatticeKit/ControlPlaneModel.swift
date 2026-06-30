@@ -8,6 +8,9 @@ import Combine
 @MainActor
 public final class ControlPlaneModel: ObservableObject {
     @Published public private(set) var sessions: [SessionView] = []
+    /// Sessions that ended within the server's TTL — Theater catch-up so an
+    /// ephemeral run isn't gone the instant it tears down.
+    @Published public private(set) var recentlyEnded: [RecentlyEndedSession] = []
     @Published public private(set) var approvals: [Approval] = []
     @Published public private(set) var traces: [TraceSummary] = []
     @Published public private(set) var personas: [Persona] = []
@@ -52,13 +55,15 @@ public final class ControlPlaneModel: ObservableObject {
 
     public func refresh() async {
         do {
-            async let s = client.sessions()
+            async let s = client.sessionsSnapshot()
             async let a = client.approvals()
             async let t = client.traces()
             async let p = client.personas()
             async let v = client.vault()
             async let h = client.handoffs()
-            sessions = try await s
+            let snap = try await s
+            sessions = snap.live
+            recentlyEnded = snap.recentlyEnded
             approvals = try await a
             traces = try await t.sorted { $0.recordedAt > $1.recordedAt }
             personas = try await p

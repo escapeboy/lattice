@@ -29,6 +29,19 @@ export interface SessionView {
   readonly actionCount: number;
 }
 
+/**
+ * A session that has just ended — kept briefly so the Theater can show a
+ * "recently ended" catch-up section for an operator who opens it a moment after
+ * an ephemeral create→act→destroy run finished (the live list drops it on
+ * teardown). SHORT-LIVED, in-memory ONLY (TTL-pruned, capped) — it carries the
+ * same non-secret session view, never PII, and is NOT the durable trace store
+ * (those stay redacted in Svod).
+ */
+export interface RecentlyEndedSession extends SessionView {
+  /** Epoch ms when the session was removed from the live theater. */
+  readonly endedAt: number;
+}
+
 export interface PolicyConfig {
   readonly allowedOrigins: string[];
   readonly egressAllowlist: string[];
