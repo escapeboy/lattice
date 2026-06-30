@@ -320,15 +320,40 @@ async function importPersona(){
 }
 
 // ── Traces / replay ───────────────────────────────────────────────────────────
+// While a replay timeline is open, pause the trace-list poll so it isn't wiped.
+var replayViewing=false;
 async function loadTraces(){
+  if(replayViewing) return;
   var d=await get('/traces'); if(!d) return; var t=d.traces||[]; var el=document.getElementById('traces');
   if(!t.length){ el.innerHTML='<div class="empty">No traces recorded yet</div>'; return; }
   el.innerHTML='<table><tr><th>Trace</th><th>Session</th><th>Duration</th><th>Actions</th><th>Success</th><th></th></tr>'+
     t.map(function(x){ var ok=x.successRate===1; return '<tr><td class="mono">'+esc(x.traceId.slice(0,12))+'</td>'+
       '<td class="mono">'+esc(x.sessionId.slice(0,8))+'</td><td>'+x.durationMs+'ms</td><td>'+x.totalActions+'</td>'+
       '<td><span class="badge '+(ok?'b-green':'b-amber')+'">'+Math.round(x.successRate*100)+'%</span></td>'+
-      '<td><a href="'+API+'/replay/'+encodeURIComponent(x.traceId)+'" target="_blank">replay ↗</a></td></tr>'; }).join('')+'</table>';
+      '<td><a href="#" onclick="openReplay(\\''+esc(x.traceId)+'\\');return false;">replay ↗</a></td></tr>'; }).join('')+'</table>';
 }
+
+// Open a trace's redacted timeline INLINE. The /replay/:id/events route is PII-
+// gated, so we fetch it WITH the bearer header (hdrs) — a plain <a> navigation
+// can't carry that header, which is why the old link 401'd. Enter the token in
+// the field (top right) first; an empty/wrong token surfaces a clear 401 toast.
+async function openReplay(id){
+  var r=await fetch(API+'/replay/'+encodeURIComponent(id)+'/events',{headers:hdrs(false)}).catch(function(){return null;});
+  if(!r){ toast('Replay fetch failed'); return; }
+  if(r.status===401){ toast('Unauthorized — enter the bearer token (top right)'); return; }
+  if(!r.ok){ toast('Replay error '+r.status); return; }
+  var d=await r.json(); var evs=(d&&d.events)||[];
+  replayViewing=true;
+  var el=document.getElementById('traces');
+  el.innerHTML='<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">'+
+    '<button class="btn-ghost" onclick="closeReplay()">← traces</button>'+
+    '<span class="mono" style="color:var(--muted)">replay '+esc(id.slice(0,12))+' · '+evs.length+' events</span></div>'+
+    (evs.length? '<table><tr><th>t</th><th>lane</th><th>event</th></tr>'+
+      evs.map(function(e){ return '<tr><td class="mono">'+esc(String(e.rel))+'ms</td>'+
+        '<td>'+esc(e.lane)+'</td><td>'+esc(e.text)+'</td></tr>'; }).join('')+'</table>'
+      : '<div class="empty">No events in this trace</div>');
+}
+function closeReplay(){ replayViewing=false; loadTraces(); }
 
 async function sendIntent(){
   var i=document.getElementById('intent-input'); var v=i.value.trim(); if(!v) return;
