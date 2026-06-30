@@ -39,8 +39,13 @@ public final class StackController: ObservableObject {
     public let gatewayPort: Int
     public let controlPlanePort: Int
     public let host = "127.0.0.1"
-    public let mcpToken = UUID().uuidString
-    public let cpToken = UUID().uuidString
+    // STABLE across launches (Keychain-backed, like vault-key/handoff-key), not a
+    // per-launch UUID. This lets an EXTERNAL MCP client — e.g. Claude Desktop
+    // bridged to the gateway over HTTP — authenticate with a CONSTANT token that
+    // can be pinned in a static config, instead of one that rotates every launch.
+    // Falls back to an ephemeral UUID only if the Keychain is unavailable.
+    public let mcpToken = KeychainStore.getOrCreateHexKey("mcp-token") ?? UUID().uuidString
+    public let cpToken = KeychainStore.getOrCreateHexKey("cp-token") ?? UUID().uuidString
     /// Native handoff → notification bridge (configured at app launch).
     public let handoffNotifier = HandoffNotifier()
 
