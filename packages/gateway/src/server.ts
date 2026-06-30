@@ -728,31 +728,47 @@ export class GatewayServer {
         // Page-level signals (#2): flag a bot-wall / error / canvas-only page so
         // the agent doesn't act on a dead page as if it were normal content.
         const signals = pageSignals(nodes, ig.title);
+        // AUTO-ESCALATE TO L3: when the AX tree is blind (canvas/WebGL/bot-wall →
+        // contentSparse), attach a screenshot even if the agent asked for L1/L2.
+        // This is the live-result fallback for the canvas failure mode: instead of
+        // returning an empty IG the agent can't use, it gets pixels — WITHOUT
+        // having to know to request L3. Explicit L3 requests still attach pixels.
+        const wantsPixels = tier === "L3" || signals?.contentSparse === true;
+        const autoEscalated = wantsPixels && tier !== "L3";
         const payload = {
-          tier: tier === "L3" ? "L3" : ig.tier,
+          tier: wantsPixels ? "L3" : ig.tier,
           url: ig.url,
           title: ig.title,
           nodeCount: nodes.length,
           serializedSize: ig.serializedSize,
           nodes: compact,
           ...(signals ? { signals } : {}),
+          ...(autoEscalated ? { autoEscalatedToL3: "the accessibility tree is sparse (canvas/WebGL/blocked) — an L3 screenshot is attached so the page isn't perceived as empty" } : {}),
           ...(d ? { delta: compactDelta(d) } : {}),
         };
         // ALL page content the agent receives is tainted — not just session_observe.
         // Registering it here is what makes a value laundered through perceive and
-        // forwarded into an operator-write arg fail the tainted-origin check.
+        // forwarded into an operator-write arg fail the tainted-origin check. The
+        // L3 screenshot rides the SAME tainted perceive boundary (invariant: page
+        // pixels are tainted-by-construction, like any perceived content).
         this.taintAgentContent(compact, ig.title);
 
-        // L3 = pixel tier: ship the IG plus a screenshot so a vision-capable
-        // agent can reason about canvas/WebGL UIs the AX tree can't represent.
-        if (tier === "L3") {
-          const data = await session.context.screenshot();
-          return {
-            content: [
-              { type: "text", text: JSON.stringify(payload, null, 2) },
-              { type: "image", data, mimeType: "image/png" },
-            ],
-          };
+        // L3 = pixel tier: ship the IG plus a screenshot so a vision-capable agent
+        // can reason about canvas/WebGL UIs the AX tree can't represent. The capture
+        // is best-effort: if the engine can't produce a screenshot we still return a
+        // LIVE result (IG + signals) rather than throw — the session stays usable.
+        if (wantsPixels) {
+          try {
+            const data = await session.context.screenshot();
+            return {
+              content: [
+                { type: "text", text: JSON.stringify(payload, null, 2) },
+                { type: "image", data, mimeType: "image/png" },
+              ],
+            };
+          } catch {
+            return ok({ ...payload, screenshot: "unavailable" });
+          }
         }
 
         return ok(payload);
@@ -833,6 +849,11 @@ export class GatewayServer {
             url: result.url,
             delta: result.delta,
             ...(result.extracted !== undefined ? { extracted: result.extracted } : {}),
+            // Bounded settle: a non-quiescing navigation succeeds but did not
+            // quiesce — tell the agent to re-perceive (it auto-escalates to L3).
+            ...(result.settled === false
+              ? { settled: false, hint: "Navigation did not settle (continuous-render / canvas / infinite-scroll). Re-perceive — perception will attach an L3 screenshot." }
+              : {}),
           });
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);

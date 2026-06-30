@@ -57,8 +57,16 @@ export function resolveAgentBrowserBinary(): string {
 export interface ProcessOptions {
   /** Base global flags applied to every command (e.g. ["--headed"]). */
   baseFlags?: readonly string[];
-  /** Per-command timeout in ms. */
+  /** Per-command HARD timeout in ms — the SIGKILL backstop, not the settle bound. */
   timeoutMs?: number;
+  /**
+   * agent-browser's OWN internal action/navigation timeout (`AGENT_BROWSER_DEFAULT_TIMEOUT`,
+   * default 25000 in the binary). Set BELOW the hard SIGKILL so the engine gives
+   * up its own wait and returns control before we'd kill it — so an abandoned
+   * navigation (after the adapter's soft settle budget elapses) cleans up promptly
+   * instead of lingering. Documented engine env knob, NOT a fork (ADR 0002 §1).
+   */
+  engineActionTimeoutMs?: number;
   /** Override the binary path (tests). */
   binaryPath?: string;
   /** Route the browser's egress through this forward proxy (Lattice egress firewall). */
@@ -71,11 +79,13 @@ export class AgentBrowserProcess implements AbRunner {
   private readonly binary: string;
   private readonly baseFlags: readonly string[];
   private readonly timeoutMs: number;
+  private readonly engineActionTimeoutMs: number | undefined;
   private readonly proxyUrl: string | undefined;
 
   constructor(opts: ProcessOptions = {}) {
     this.binary = opts.binaryPath ?? resolveAgentBrowserBinary();
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    this.engineActionTimeoutMs = opts.engineActionTimeoutMs;
     this.proxyUrl = opts.proxyUrl;
     // Egress firewall: route the browser through the Lattice forward proxy via
     // agent-browser's `--proxy` GLOBAL flag — which maps to Playwright's proxy
@@ -105,6 +115,12 @@ export class AgentBrowserProcess implements AbRunner {
     return new Promise((resolve, reject) => {
       const child = spawn(this.binary, argv as string[], {
         stdio: ["ignore", "pipe", "pipe"],
+        // Bound agent-browser's OWN navigation/action wait so a non-quiescing page
+        // returns control near our settle budget rather than at the binary's 25s
+        // default. The hard SIGKILL below stays the last-resort backstop.
+        ...(this.engineActionTimeoutMs !== undefined
+          ? { env: { ...process.env, AGENT_BROWSER_DEFAULT_TIMEOUT: String(this.engineActionTimeoutMs) } }
+          : {}),
       });
       let out = "";
       let err = "";

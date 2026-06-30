@@ -33,16 +33,38 @@ class AgentBrowserSession implements EngineSession {
   readonly id: EngineSessionId;
   private lastUrl = "";
 
-  constructor(private readonly runner: AbRunner, id: string) {
+  constructor(
+    private readonly runner: AbRunner,
+    id: string,
+    /** Bounded navigation settle budget (ms). 0/undefined → wait unbounded (legacy). */
+    private readonly settleBudgetMs = 0,
+  ) {
     this.id = id as EngineSessionId;
   }
 
   async navigate(url: string): Promise<NavResult> {
-    const env = await this.runner.run(this.id, "open", [url]);
+    // BOUNDED SETTLE: a continuous-render canvas/WebGL, infinite-scroll, or polling
+    // page never reaches the engine's quiescence, so `open` would block until the
+    // hard SIGKILL — looking like a hang and then THROWING. Race the engine call
+    // against the settle budget: if the budget elapses first, DEGRADE (resolve a
+    // not-settled result) instead of hanging/throwing. The DOM is almost certainly
+    // loaded; the caller escalates to an L3 screenshot and the session stays alive.
+    // A genuine failure (egress block, DNS, ERR_*) returns a failed envelope FAST,
+    // well inside the budget, so `fail()` still throws it — the degrade path is the
+    // settle TIMEOUT alone, never a real error.
+    const outcome = await withSettleBudget(
+      this.runner.run(this.id, "open", [url]),
+      this.settleBudgetMs,
+    );
+    if (outcome.kind === "timeout") {
+      this.lastUrl = url;
+      return { url, title: "", settled: false };
+    }
+    const env = outcome.value;
     fail(env, "navigate");
     const landed = str(env.data?.["url"]) ?? url;
     this.lastUrl = landed;
-    return { url: landed, title: str(env.data?.["title"]) ?? "" };
+    return { url: landed, title: str(env.data?.["title"]) ?? "", settled: true };
   }
 
   async currentUrl(): Promise<string> {
@@ -141,23 +163,41 @@ class AgentBrowserSession implements EngineSession {
   }
 }
 
+/**
+ * Default bounded navigation settle budget (ms). A continuous-render / non-quiescing
+ * page degrades to a not-settled NavResult after this, instead of hanging to the
+ * hard SIGKILL. Configurable via the engine options (serve wires an env knob).
+ */
+export const DEFAULT_SETTLE_BUDGET_MS = 12_000;
+/** Grace added on top of the settle budget for agent-browser's own internal
+ *  timeout, so an abandoned navigation cleans up just after we've degraded. */
+const ENGINE_TIMEOUT_GRACE_MS = 4_000;
+
 export interface AgentBrowserEngineOptions {
   /** Inject a runner (tests). Defaults to a real AgentBrowserProcess. */
   runner?: AbRunner;
-  /** Per-command timeout (ms) for the default runner. */
+  /** Per-command HARD timeout (ms) — the SIGKILL backstop for the default runner. */
   timeoutMs?: number;
+  /**
+   * Bounded navigation settle budget (ms). After this, `navigate` resolves a
+   * not-settled NavResult rather than blocking until the hard timeout. Default
+   * {@link DEFAULT_SETTLE_BUDGET_MS}. Set 0 to restore the legacy unbounded wait.
+   */
+  settleBudgetMs?: number;
 }
 
 export class AgentBrowserEngine implements SemanticEngine {
   private runner: AbRunner | undefined;
   private readonly injected: AbRunner | undefined;
   private readonly timeoutMs: number | undefined;
+  private readonly settleBudgetMs: number;
   private readonly sessions = new Set<string>();
   private device: string | undefined;
 
   constructor(opts: AgentBrowserEngineOptions = {}) {
     this.injected = opts.runner;
     this.timeoutMs = opts.timeoutMs;
+    this.settleBudgetMs = opts.settleBudgetMs ?? DEFAULT_SETTLE_BUDGET_MS;
   }
 
   launch(config: EngineLaunchConfig = {}): Promise<void> {
@@ -168,6 +208,11 @@ export class AgentBrowserEngine implements SemanticEngine {
       this.runner = new AgentBrowserProcess({
         baseFlags: config.headed ? ["--headed"] : [],
         ...(this.timeoutMs !== undefined ? { timeoutMs: this.timeoutMs } : {}),
+        // Bound agent-browser's own wait just above our settle budget so an
+        // abandoned (degraded) navigation returns control promptly.
+        ...(this.settleBudgetMs > 0
+          ? { engineActionTimeoutMs: this.settleBudgetMs + ENGINE_TIMEOUT_GRACE_MS }
+          : {}),
         ...(config.proxyUrl ? { proxyUrl: config.proxyUrl } : {}),
       });
     }
@@ -183,7 +228,7 @@ export class AgentBrowserEngine implements SemanticEngine {
     // Apply device emulation for the session (S9 mobile). `set` is a benign
     // emulation setting, not a firewalled primitive.
     if (this.device) await this.runner.run(id, "set", ["device", this.device]);
-    return new AgentBrowserSession(this.runner, id);
+    return new AgentBrowserSession(this.runner, id, this.settleBudgetMs);
   }
 
   async shutdown(): Promise<void> {
@@ -202,4 +247,42 @@ function str(v: unknown): string | undefined {
 
 function fail(env: AbEnvelope, op: string): void {
   if (!env.success) throw new Error(`agent-browser ${op} failed: ${env.error ?? "unknown error"}`);
+}
+
+type SettleOutcome<T> = { kind: "value"; value: T } | { kind: "timeout" };
+
+/**
+ * Resolve `p`'s value if it arrives within `budgetMs`; otherwise resolve a
+ * `timeout` marker WITHOUT rejecting. The in-flight command is left to finish on
+ * its own (under agent-browser's internal timeout + the runner's hard SIGKILL) —
+ * its eventual rejection is swallowed so it can't surface as an unhandled
+ * rejection. `budgetMs <= 0` disables the bound (await `p` directly). A `p` that
+ * REJECTS inside the budget propagates the rejection (a real engine error must
+ * still throw — only a settle TIMEOUT degrades).
+ */
+function withSettleBudget<T>(p: Promise<T>, budgetMs: number): Promise<SettleOutcome<T>> {
+  if (!(budgetMs > 0)) return p.then((value) => ({ kind: "value", value }));
+  return new Promise<SettleOutcome<T>>((resolve, reject) => {
+    let done = false;
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      resolve({ kind: "timeout" });
+    }, budgetMs);
+    if (typeof timer.unref === "function") timer.unref();
+    p.then(
+      (value) => {
+        if (done) return;
+        done = true;
+        clearTimeout(timer);
+        resolve({ kind: "value", value });
+      },
+      (err: unknown) => {
+        if (done) return; // already degraded on timeout — swallow the late rejection
+        done = true;
+        clearTimeout(timer);
+        reject(err instanceof Error ? err : new Error(String(err)));
+      },
+    );
+  });
 }

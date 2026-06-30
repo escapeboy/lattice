@@ -26,8 +26,11 @@ export class BuildOnPerceptionAdapter implements PerceptionEngine {
   constructor(private readonly session: BuildOnSession) {}
 
   async snapshot(tier: FidelityTier): Promise<PerceptionSnapshot> {
-    // L2/L3 keep all roles; L1/L0 use the interactive snapshot. (No pixels: L3
-    // degrades to L2, matching the CDP engine's P0 behaviour.)
+    // L2/L3 keep all roles; L1/L0 use the interactive snapshot. L3 returns the
+    // full-role (minimal, for a canvas page) IG as the COMPANION to the pixels:
+    // the gateway captures the screenshot via context.screenshot() at the
+    // perceive_snapshot boundary (engine-agnostic). IG-here + gateway-screenshot
+    // together are the L3 result — implemented, not a degrade-to-L2 stub.
     const ig = await this.session.perceive(tier === "L2" || tier === "L3" ? "L2" : "L1");
     const graph = ig.graph;
     if (tier === "L0") {
@@ -67,6 +70,7 @@ export class BuildOnActionAdapter implements ActionEngine {
       delta: igDelta(prev, next),
       url: result.url ?? next.url,
       ...(result.extracted !== undefined ? { extracted: result.extracted } : {}),
+      ...(result.settled === false ? { settled: false } : {}),
     };
   }
 }

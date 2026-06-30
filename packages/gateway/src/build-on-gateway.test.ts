@@ -34,8 +34,13 @@ function toolJson(res: { [x: string]: unknown }): Record<string, unknown> {
 class FakeEngine implements SemanticEngine, EngineSession {
   readonly id = "lattice-fake" as EngineSession["id"];
   launched = false;
-  tree = '- button "Submit" [ref=e1]\n- textbox "Email" [ref=e2]';
+  // 3 addressable nodes → a NORMAL page (above the contentSparse ≤2 threshold),
+  // so the normal perceive path (no auto-L3) is what the baseline tests exercise.
+  tree = '- link "Home" [ref=e3]\n- button "Submit" [ref=e1]\n- textbox "Email" [ref=e2]';
   acts: SemanticAction[] = [];
+  /** Override per test to simulate a non-quiescing navigation (settled:false). */
+  nextNavSettled: boolean | undefined;
+  screenshotCalls = 0;
 
   // SemanticEngine
   launch(): Promise<void> {
@@ -50,7 +55,7 @@ class FakeEngine implements SemanticEngine, EngineSession {
   }
   // EngineSession
   navigate(url: string): Promise<NavResult> {
-    return Promise.resolve({ url, title: "" });
+    return Promise.resolve({ url, title: "", ...(this.nextNavSettled !== undefined ? { settled: this.nextNavSettled } : {}) });
   }
   currentUrl(): Promise<string> {
     return Promise.resolve("https://app.example.com/");
@@ -62,7 +67,9 @@ class FakeEngine implements SemanticEngine, EngineSession {
     return Promise.resolve("page text");
   }
   screenshot(): Promise<string> {
-    return Promise.resolve("BASE64PNG");
+    this.screenshotCalls += 1;
+    // Valid base64 (the MCP SDK validates image content data on the wire).
+    return Promise.resolve(Buffer.from("fake-png-bytes").toString("base64"));
   }
   act(action: SemanticAction): Promise<ActionResult> {
     this.acts.push(action);
@@ -146,6 +153,75 @@ describe("build-on gateway — external MCP client drives the build-on stack (S6
     // act_execute surfaces the kernel refusal as an error result.
     expect(JSON.stringify(res)).toMatch(/prohibit|grant|block|human/i);
     expect(engine.acts.filter((a) => a.type === "submit")).toHaveLength(0);
+
+    await client.close();
+    await gateway.stop();
+  });
+});
+
+describe("build-on gateway — canvas / non-quiescing fallback (Stage A+B)", () => {
+  type ContentItem = { type: string; data?: string; mimeType?: string; text?: string };
+  const content = (res: { [x: string]: unknown }): ContentItem[] => (res as { content: ContentItem[] }).content;
+
+  it("STAGE B: a canvas/sparse page auto-escalates to L3 — screenshot + minimal IG, never empty", async () => {
+    const { engine, client, gateway } = await build();
+    engine.tree = '- img "WebGL aquarium" [ref=e1]'; // 1 node → contentSparse (the aquarium case)
+    const { sessionId } = toolJson(await client.callTool({ name: "session_create", arguments: {} })) as { sessionId: string };
+
+    // Agent asks for L1 (NOT L3) — the gateway escalates on its own because the
+    // accessibility tree is blind.
+    const res = await client.callTool({ name: "perceive_snapshot", arguments: { sessionId, tier: "L1" } });
+    const items = content(res);
+    const text = items.find((i) => i.type === "text")!;
+    const image = items.find((i) => i.type === "image");
+    const payload = JSON.parse(text.text!) as Record<string, unknown>;
+
+    expect(image).toBeTruthy();                       // a live screenshot is attached
+    expect(image!.data).toBe(Buffer.from("fake-png-bytes").toString("base64"));
+    expect(image!.mimeType).toBe("image/png");
+    expect(engine.screenshotCalls).toBe(1);
+    expect(payload["tier"]).toBe("L3");               // auto-escalated
+    expect(payload["autoEscalatedToL3"]).toBeTruthy();
+    expect((payload["signals"] as { contentSparse: boolean }).contentSparse).toBe(true);
+
+    await client.close();
+    await gateway.stop();
+  });
+
+  it("STAGE A+B: navigating to a non-quiescing canvas returns a LIVE result, no hang/throw, session stays usable", async () => {
+    const { engine, client, gateway } = await build();
+    engine.nextNavSettled = false;                    // bounded-settle adapter degraded the page
+    engine.tree = '- img "WebGL aquarium" [ref=e1]';
+    const { sessionId } = toolJson(await client.callTool({ name: "session_create", arguments: {} })) as { sessionId: string };
+
+    // (A) Navigation succeeds (not-settled) — does NOT throw / hang.
+    const nav = toolJson(await client.callTool({
+      name: "act_execute",
+      arguments: { sessionId, command: { type: "navigate", url: "https://webglsamples.org/aquarium/aquarium.html" } },
+    }));
+    expect(nav["success"]).toBe(true);
+    expect(nav["settled"]).toBe(false);
+
+    // (B) The follow-up perceive yields pixels — the case is captured.
+    const res = await client.callTool({ name: "perceive_snapshot", arguments: { sessionId, tier: "L1" } });
+    expect(content(res).some((i) => i.type === "image")).toBe(true);
+
+    // Session is still alive and usable afterward.
+    const again = toolJson(await client.callTool({ name: "session_list", arguments: {} }));
+    expect((again["sessions"] as string[])).toContain(sessionId);
+
+    await client.close();
+    await gateway.stop();
+  });
+
+  it("REGRESSION: a normal (non-sparse) page does NOT auto-escalate — no screenshot, plain L1", async () => {
+    const { engine, client, gateway } = await build(); // default tree = 3 nodes (normal)
+    const { sessionId } = toolJson(await client.callTool({ name: "session_create", arguments: {} })) as { sessionId: string };
+    const res = await client.callTool({ name: "perceive_snapshot", arguments: { sessionId, tier: "L1" } });
+    const items = content(res);
+    expect(items.some((i) => i.type === "image")).toBe(false);
+    expect(engine.screenshotCalls).toBe(0);
+    expect((JSON.parse(items[0]!.text!) as Record<string, unknown>)["tier"]).toBe("L1");
 
     await client.close();
     await gateway.stop();

@@ -30,6 +30,13 @@ export interface GovernedActionResult {
   readonly url: string | undefined;
   /** Extracted text, for the `extract` verb. */
   readonly extracted?: string;
+  /**
+   * For `navigate`: `false` when the page did not settle within the bounded
+   * budget (continuous-render canvas / infinite-scroll / polling). The action
+   * SUCCEEDED (no hang, no throw) but perception should escalate to L3/screenshot.
+   * Omitted on a normal settled navigation and on non-navigate actions.
+   */
+  readonly settled?: boolean;
 }
 
 /**
@@ -68,7 +75,12 @@ export class GovernedActuator {
       // Politeness: wait for a per-origin slot before hitting the site (P1.2).
       await this.ctx.rateLimiter?.acquire(command.url);
       const res = await this.engine.navigate(command.url);
-      return { ok: true, url: res.url };
+      // Bounded settle: a non-quiescing page resolves not-settled rather than
+      // hanging/throwing. Surface that so perception escalates to L3 — the nav
+      // itself is NOT a failure, so it is NOT a navigation_interrupted (which
+      // would drive the agent into a re-perceive retry loop on a page that will
+      // never quiesce). Single-pass by construction; no retry here.
+      return { ok: true, url: res.url, ...(res.settled === false ? { settled: false } : {}) };
     }
 
     const decision = await this.kernel.requestGrant({

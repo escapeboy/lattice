@@ -87,7 +87,14 @@ async function main(): Promise<void> {
   let cdpEngine: ReturnType<typeof createEngineAdapter> | undefined;
   let buildOnEngine: AgentBrowserEngine | undefined;
   if (engineKind === "agent-browser") {
-    buildOnEngine = new AgentBrowserEngine();
+    // Bounded navigation settle (ms): a continuous-render canvas/WebGL,
+    // infinite-scroll, or polling page degrades to a not-settled result + L3
+    // screenshot after this, instead of hanging to the hard SIGKILL. Default 12s;
+    // 0 restores the legacy unbounded wait.
+    const settleMs = process.env["LATTICE_NAV_SETTLE_MS"];
+    buildOnEngine = new AgentBrowserEngine(
+      settleMs !== undefined && settleMs !== "" ? { settleBudgetMs: Number(settleMs) } : {},
+    );
     await buildOnEngine.launch({
       headed: process.env["LATTICE_HEADED"] === "1",
       ...(process.env["LATTICE_DEVICE"] ? { device: process.env["LATTICE_DEVICE"] } : {}),

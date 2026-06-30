@@ -34,6 +34,16 @@ export interface NavResult {
   url: string;
   /** Page title, when the engine reports one. */
   title: string;
+  /**
+   * Whether the page reached the engine's settle/quiescence within the bounded
+   * settle budget. `true` (or omitted) = settled normally. `false` = the budget
+   * elapsed before the engine returned: the DOM is (almost certainly) loaded but
+   * the page never quiesced — a continuous-render canvas/WebGL, an infinite-scroll
+   * feed, or a polling page. Callers DEGRADE (e.g. L3 screenshot) rather than
+   * treat it as a hard failure; the session stays alive. A genuine navigation
+   * failure (egress block, DNS, ERR_*) still throws — it never reaches here.
+   */
+  settled?: boolean;
 }
 
 /** A single interactive node from the accessibility snapshot. */

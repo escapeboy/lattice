@@ -69,6 +69,13 @@ export interface ActionResult {
   readonly extracted?: unknown;
   /** URL after the action (may differ from before on navigation). */
   readonly url: string;
+  /**
+   * For `navigate`: `false` when the page did not settle within the bounded
+   * budget (continuous-render canvas / infinite-scroll / polling). The action
+   * still succeeded — perception should escalate to an L3 screenshot. Omitted
+   * on a settled navigation and on non-navigate actions.
+   */
+  readonly settled?: boolean;
 }
 
 export interface ActionEngine {

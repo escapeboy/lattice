@@ -50,7 +50,7 @@ describe("AgentBrowserEngine — command mapping", () => {
     const { session } = await makeSession(runner);
     const res = await session.navigate("https://example.com");
     expect(runner.last()).toMatchObject({ subcommand: "open", args: ["https://example.com"] });
-    expect(res).toEqual({ url: "https://example.com/landed", title: "Example" });
+    expect(res).toEqual({ url: "https://example.com/landed", title: "Example", settled: true });
   });
 
   it("snapshot → snapshot -i, parsing refs map + tree (real envelope shape)", async () => {
@@ -158,5 +158,76 @@ describe("AgentBrowserEngine — command mapping", () => {
     await engine.launch({ device: "iPhone 12" });
     await engine.createSession();
     expect(runner.calls.some((c) => c.subcommand === "set" && c.args.join(" ") === "device iPhone 12")).toBe(true);
+  });
+});
+
+describe("AgentBrowserEngine — bounded navigation settle (Stage A)", () => {
+  /** A runner whose `open` NEVER resolves — a continuous-render / non-quiescing page. */
+  class HangingOpenRunner implements AbRunner {
+    openStarted = false;
+    run(_session: string, subcommand: string): Promise<AbEnvelope> {
+      if (subcommand === "open") {
+        this.openStarted = true;
+        return new Promise<AbEnvelope>(() => { /* never settles */ });
+      }
+      return Promise.resolve({ success: true, data: {}, error: null });
+    }
+  }
+
+  it("degrades a non-quiescing navigation to settled:false within the budget — no hang", async () => {
+    const runner = new HangingOpenRunner();
+    const engine = new AgentBrowserEngine({ runner, settleBudgetMs: 60 });
+    await engine.launch();
+    const session = await engine.createSession();
+
+    const started = Date.now();
+    const res = await session.navigate("https://webglsamples.org/aquarium/aquarium.html");
+    const elapsed = Date.now() - started;
+
+    expect(runner.openStarted).toBe(true);
+    // Resolved (not thrown), flagged not-settled, and well before any 30s SIGKILL.
+    expect(res).toEqual({ url: "https://webglsamples.org/aquarium/aquarium.html", title: "", settled: false });
+    expect(elapsed).toBeLessThan(1000);
+  });
+
+  it("is reliability-general: an infinite-scroll/polling page degrades the same way", async () => {
+    const runner = new HangingOpenRunner();
+    const engine = new AgentBrowserEngine({ runner, settleBudgetMs: 60 });
+    await engine.launch();
+    const session = await engine.createSession();
+    const res = await session.navigate("https://example.com/infinite-feed");
+    expect(res.settled).toBe(false);
+    expect(res.url).toBe("https://example.com/infinite-feed");
+  });
+
+  it("does NOT degrade when the page settles inside the budget (settled:true)", async () => {
+    const runner: AbRunner = {
+      run: (_s, sub) =>
+        Promise.resolve(
+          sub === "open"
+            ? { success: true, data: { url: "https://example.com/", title: "OK" }, error: null }
+            : { success: true, data: {}, error: null },
+        ),
+    };
+    const engine = new AgentBrowserEngine({ runner, settleBudgetMs: 1000 });
+    await engine.launch();
+    const session = await engine.createSession();
+    const res = await session.navigate("https://example.com");
+    expect(res).toEqual({ url: "https://example.com/", title: "OK", settled: true });
+  });
+
+  it("a real failure still THROWS (egress block / ERR) — degrade is the settle TIMEOUT alone", async () => {
+    const runner: AbRunner = {
+      run: (_s, sub) =>
+        Promise.resolve(
+          sub === "open"
+            ? { success: false, data: null, error: "net::ERR_TUNNEL_CONNECTION_FAILED" }
+            : { success: true, data: {}, error: null },
+        ),
+    };
+    const engine = new AgentBrowserEngine({ runner, settleBudgetMs: 1000 });
+    await engine.launch();
+    const session = await engine.createSession();
+    await expect(session.navigate("https://blocked.test")).rejects.toThrow(/ERR_TUNNEL/);
   });
 });

@@ -66,7 +66,11 @@ export class PerceptionEngineImpl implements PerceptionEngine {
     }
 
     if (tier === "L3") {
-      // L3 = pixel render (not in P0 scope); return L2 with geometry as approximation
+      // L3 = pixel tier. This engine returns the COMPANION geometry IG (L2 + box
+      // geometry, so a vision agent can map pixels↔nodes); the actual screenshot
+      // is captured and shipped at the gateway boundary (perceive_snapshot →
+      // context.screenshot()), which is engine-agnostic. So L3 is implemented, not
+      // a stub: the IG below + the gateway's screenshot together ARE the L3 result.
       return buildInteractionGraph(this.cdp, url, title, true);
     }
 

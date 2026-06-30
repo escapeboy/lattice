@@ -18,10 +18,12 @@ class FakeSession implements EngineSession {
   navs: string[] = [];
   nextActOk = true;
   nextActError: string | undefined;
+  /** Simulate a non-quiescing page: the bounded-settle adapter resolves not-settled. */
+  nextNavSettled: boolean | undefined;
 
   navigate(url: string): Promise<NavResult> {
     this.navs.push(url);
-    return Promise.resolve({ url, title: "" });
+    return Promise.resolve({ url, title: "", ...(this.nextNavSettled !== undefined ? { settled: this.nextNavSettled } : {}) });
   }
   currentUrl(): Promise<string> {
     return Promise.resolve("https://app.example.com/");
@@ -118,6 +120,17 @@ describe("GovernedActuator — kernel gating over the semantic engine", () => {
     const res = await actuator().execute({ type: "navigate", url: "https://app.example.com/next" });
     expect(res.ok).toBe(true);
     expect(session.navs).toEqual(["https://app.example.com/next"]);
+  });
+
+  it("CIRCUIT-BREAKER: a non-quiescing navigation succeeds (not-settled), NOT a navigation_interrupted retry loop", async () => {
+    session.nextNavSettled = false; // bounded-settle adapter degraded the page
+    // Must NOT throw — a throw here would surface as navigation_interrupted with a
+    // "re-perceive" hint, driving the agent to retry navigate on a page that will
+    // never quiesce. Instead it resolves ok with settled:false → perceive escalates.
+    const res = await actuator().execute({ type: "navigate", url: "https://app.example.com/aquarium" });
+    expect(res.ok).toBe(true);
+    expect(res.settled).toBe(false);
+    expect(session.navs).toEqual(["https://app.example.com/aquarium"]); // single-pass, no retry
   });
 
   it("a stale NodeId with no live ref yields a typed element_gone with a re-perceive hint", async () => {
