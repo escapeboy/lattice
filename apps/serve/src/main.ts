@@ -242,10 +242,19 @@ async function main(): Promise<void> {
     watchdog.unref();
   }
 
-  const { url: mcpUrl } = await gateway.startHttp(gwPort, gwHost);
-  const { url: cpUrl } = await control.start(cpPort, "127.0.0.1");
-  console.error(`Lattice serve — MCP gateway: ${mcpUrl}`);
-  console.error(`Lattice serve — control plane: ${cpUrl}`);
+  if (process.env["LATTICE_TRANSPORT"] === "stdio") {
+    // Stdio MCP (Claude Desktop / CLI): speak MCP over stdout, no HTTP port and
+    // no control-plane bind — mirrors the legacy gateway entry but on the
+    // build-on (governed, firewalled) engine. ALL logging stays on stderr so it
+    // can't corrupt the stdio protocol stream.
+    await gateway.startStdio();
+    console.error("Lattice serve — MCP gateway on stdio (build-on)");
+  } else {
+    const { url: mcpUrl } = await gateway.startHttp(gwPort, gwHost);
+    const { url: cpUrl } = await control.start(cpPort, "127.0.0.1");
+    console.error(`Lattice serve — MCP gateway: ${mcpUrl}`);
+    console.error(`Lattice serve — control plane: ${cpUrl}`);
+  }
 }
 
 main().catch((e: unknown) => {
