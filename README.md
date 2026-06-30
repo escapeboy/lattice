@@ -183,7 +183,7 @@ the whole stack (gateway + agent-browser + Chromium) comes up; quit and it tears
 down cleanly (zero orphans). Vault secrets persist in the **macOS Keychain**;
 human-handoff approvals arrive as **native notifications** with Approve/Deny.
 
-Download the notarized **[`Lattice-macOS-0.2.0.dmg`](https://github.com/escapeboy/lattice/releases/latest)**,
+Download the notarized **[`Lattice-macOS-0.2.3.dmg`](https://github.com/escapeboy/lattice/releases/latest)**,
 open it, drag **Lattice** to **Applications**, and launch. The menubar shield
 supervises the stack — left-click opens the Control Plane, right-click the menu;
 existing installs auto-update via Sparkle. Or build from source:
