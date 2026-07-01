@@ -187,6 +187,43 @@ live("BuildOnSession — governed end-to-end over real agent-browser (S4/S6)", (
     const click = await session.act({ type: "act", target: { nodeId: buttonId } });
     expect(click.ok).toBe(true);
   });
+
+  it("EFFECT-GATE (live): click on an EXPLICIT submit control is gated; a bare <button> default-submit is NOT (residual)", async () => {
+    // Recording DENY handler: a gated click is blocked (no navigation) and we can
+    // read WHICH actionType the kernel classified. Exercises the REAL `get attr`
+    // probe against the agent-browser binary — validates the envelope parse too.
+    const calls: string[] = [];
+    const k = createSecurityKernel({
+      allowedOrigins: [],
+      egressAllowlist: [],
+      prohibitedActions: [],
+      grantHandler: (req): Promise<GrantDecision> => {
+        calls.push(req.actionType);
+        return Promise.resolve({ granted: false, reason: "test-deny" });
+      },
+    });
+    const es = await engine.createSession();
+    const s = new BuildOnSession(es, k, { origin: "data:", sessionId: "live-gate" });
+
+    // 1) <input type=submit>: clicking via `act` must reclassify to `submit` →
+    //    the grant handler fires (hole A closed). Denied → the click is blocked.
+    await s.act({ type: "navigate", url: "data:text/html,<form><input aria-label=User><input type=submit value=Login></form>" });
+    const ig1 = await s.perceive();
+    const submitId = [...ig1.graph.nodes.values()].find((n) => n.role === "button")!.id;
+    await expect(s.act({ type: "act", target: { nodeId: submitId } })).rejects.toThrow();
+    expect(calls).toEqual(["submit"]); // effect-gate fired: the click was classified as submit
+
+    // 2) Bare <button> (no type attr = DEFAULT submit): clicking it is benign
+    //    today — NO grant fires. This is the documented residual.
+    await s.act({ type: "navigate", url: "data:text/html,<form><input aria-label=Note><button>Save</button></form>" });
+    const ig2 = await s.perceive();
+    const bareId = [...ig2.graph.nodes.values()].find((n) => n.role === "button")!.id;
+    const res = await s.act({ type: "act", target: { nodeId: bareId } });
+    expect(res.ok).toBe(true); // executed with no gate
+    expect(calls).toEqual(["submit"]); // unchanged — the bare button did NOT trigger a grant
+
+    await es.close().catch(() => undefined);
+  }, 60_000);
 });
 
 describe("BuildOnSession — bounded failure recovery (P2.1)", () => {

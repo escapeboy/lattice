@@ -334,6 +334,33 @@ infra layer bounds the residual at the network.
 `navigate / snapshot / read / act / close` — eval, raw-CDP, and file access are
 structurally absent *and* firewalled.
 
+### Consequential gating is by effect, but a bare default-submit `<button>` is a residual
+
+The gate no longer trusts the verb the agent chose. Because the engine compiles a
+`click` and a `submit` to the **same** operation (`click @ref`,
+`packages/engine-adapter/src/adapter.ts:132-134`), an agent could otherwise dodge
+the consequential grant by sending `act` (click) on a submit button instead of
+`submit`. `GovernedActuator` closes that: before granting a click it probes the
+target with a non-eval `get attr type` (`EngineSession.getAttr`, firewall-allowed
+— the target is never `cdp-url`) and reclassifies a click on an **explicit** submit
+control (`<input type=submit|image>`, `<button type=submit>`) as `submit`, routing
+it through the same human grant (`packages/action/src/governed-actuator.ts`). This
+is proven on the live agent-browser path
+(`packages/gateway/src/build-on-session.test.ts`, `LATTICE_LIVE_ENGINE=1`).
+
+**Known limitation — bare default-submit buttons.** A `<button>` with **no `type`
+attribute** defaults to `submit` inside a form, yet exposes no `type` to read, and
+the build-on accessibility snapshot carries no tag/type (JSON refs are `{role,
+name}` only). Distinguishing such a button from a benign `<button type=button>`
+would need DOM/form introspection — which is exactly the **eval surface the engine
+firewall closes** — or an upstream agent-browser "did this click submit a form"
+signal (a coupling we don't take today). So the ceiling is: **explicit submit
+controls are gated; a form whose submit trigger is a bare `<button>` (default
+type) can still be submitted via a benign `act` click, ungated.** Closing it is
+tracked as separate work (DOM-introspection vs engine-signal — both have costs);
+the compensating fact is that security-critical forms (login / checkout / payment)
+almost always use an explicit `type=submit`, which *is* gated.
+
 ---
 
 ## 7. Default-deployment hardening (A1)
