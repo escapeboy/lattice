@@ -110,6 +110,46 @@ describe("BuildOnActionAdapter — implements ActionEngine", () => {
       action.execute({ type: "submit", target: { nodeId: firstButtonId(g) } }),
     ).rejects.toThrow();
   });
+
+  // G4 — additive governance metadata. The act_execute output is a PUBLIC contract
+  // consumed by every agent; the new fields must be purely additive.
+  it("benign action keeps the old contract (success/url/delta) and adds gated:false", async () => {
+    const { action, perception } = build();
+    await perception.snapshot("L1");
+    const res = await action.execute({ type: "act", target: { nodeId: firstButtonId(await firstGraph(perception)) } });
+    // Old consumer reads ONLY these three — unchanged shape and values.
+    const { success, url, delta } = res;
+    expect(success).toBe(true);
+    expect(url).toContain(ORIGIN);
+    expect(delta).toBeDefined();
+    // Additive: an ungated action is explicitly not gated and carries no handle.
+    expect(res.gated).toBe(false);
+    expect(res.grantId).toBeUndefined();
+    expect(res.policyClass).toBeUndefined();
+  });
+
+  it("approved consequential action carries gated:true + grantId + policyClass, success/url/delta intact", async () => {
+    const engine = new FakeEngine();
+    const kernel = createSecurityKernel({
+      allowedOrigins: [ORIGIN],
+      egressAllowlist: [],
+      prohibitedActions: [],
+      grantHandler: () => Promise.resolve({ granted: true, grantId: "gX" }),
+    });
+    const session = new BuildOnSession(engine, kernel, { origin: ORIGIN, sessionId: "s1" });
+    const perception = new BuildOnPerceptionAdapter(session);
+    const action = new BuildOnActionAdapter(session, perception);
+    const g = await firstGraph(perception);
+    const res = await action.execute({ type: "submit", target: { nodeId: firstButtonId(g) } });
+    // Old contract intact…
+    expect(res.success).toBe(true);
+    expect(res.url).toContain(ORIGIN);
+    expect(res.delta).toBeDefined();
+    // …plus the additive governance metadata that makes approval legible.
+    expect(res.gated).toBe(true);
+    expect(res.grantId).toBe("gX");
+    expect(res.policyClass).toBe("consequential");
+  });
 });
 
 async function firstGraph(p: BuildOnPerceptionAdapter): Promise<InteractionGraph> {

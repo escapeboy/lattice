@@ -61,6 +61,10 @@ GOVERNANCE -- EXPECTED, NOT ERRORS
 - Add an optional intent to a consequential command, e.g.
   act_execute {type:"submit", target:{nodeId}, intent:"Log in as the test user"}.
   It is shown to the human approver so they can decide faster. Display-only.
+- A SUCCESSFUL act_execute result tells you how it was authorized: an approved
+  consequential action carries gated:true + grantId + policyClass; a free (benign)
+  action carries gated:false. Use it to know which of your actions passed a human
+  approval versus ran ungated -- your own governance is legible, not invisible.
 - Prohibited actions (account creation, payments, captcha-solving, permission/ACL
   changes...) are refused outright. Do not attempt workarounds.
 - Navigation outside the task's allowed origins returns origin_out_of_scope. Stay in

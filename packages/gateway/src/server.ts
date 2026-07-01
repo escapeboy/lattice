@@ -850,6 +850,14 @@ export class GatewayServer {
             url: result.url,
             delta: result.delta,
             ...(result.extracted !== undefined ? { extracted: result.extracted } : {}),
+            // Governance metadata (ADDITIVE — success/url/delta unchanged). A
+            // human-approved consequential action carries gated:true + the opaque
+            // grantId + policyClass, so the agent can tell it passed human approval
+            // rather than executing freely; a benign action carries gated:false.
+            // (A denial is a typed error, thrown, not this success shape.)
+            ...(result.gated !== undefined ? { gated: result.gated } : {}),
+            ...(result.grantId ? { grantId: result.grantId } : {}),
+            ...(result.policyClass ? { policyClass: result.policyClass } : {}),
             // Bounded settle: a non-quiescing navigation succeeds but did not
             // quiesce — tell the agent to re-perceive (it auto-escalates to L3).
             ...(result.settled === false

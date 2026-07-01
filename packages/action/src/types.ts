@@ -76,6 +76,14 @@ export interface ActionResult {
    * on a settled navigation and on non-navigate actions.
    */
   readonly settled?: boolean;
+  /**
+   * Governance metadata (ADDITIVE): `gated` is true when the action passed a
+   * human grant (consequential). A gated action also carries `grantId` (opaque
+   * handle, not a secret) and `policyClass`. Absent/false for benign/read.
+   */
+  readonly gated?: boolean;
+  readonly grantId?: string;
+  readonly policyClass?: string;
 }
 
 export interface ActionEngine {

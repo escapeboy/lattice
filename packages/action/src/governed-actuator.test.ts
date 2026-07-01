@@ -80,6 +80,10 @@ describe("GovernedActuator — kernel gating over the semantic engine", () => {
     const res = await actuator().execute({ type: "act", target: target() });
     expect(res.ok).toBe(true);
     expect(session.acts).toEqual([{ type: "click", target: { kind: "ref", ref: "e1" } }]);
+    // G4: a benign action is NOT gated and carries no grant handle.
+    expect(res.gated).toBe(false);
+    expect(res.grantId).toBeUndefined();
+    expect(res.policyClass).toBeUndefined();
   });
 
   it("fill re-anchors and forwards the value", async () => {
@@ -98,6 +102,10 @@ describe("GovernedActuator — kernel gating over the semantic engine", () => {
     const res = await actuator(granting).execute({ type: "submit", target: target() });
     expect(res.ok).toBe(true);
     expect(session.acts[0]).toMatchObject({ type: "submit" });
+    // G4: an approved consequential action is legible to the agent.
+    expect(res.gated).toBe(true);
+    expect(res.grantId).toBe("g1");
+    expect(res.policyClass).toBe("consequential");
   });
 
   it("EFFECT-GATE: a click (act) on an explicit submit control is classified consequential — verb-name bypass closed", async () => {
@@ -119,6 +127,10 @@ describe("GovernedActuator — kernel gating over the semantic engine", () => {
     const res = await actuator(granting).execute({ type: "act", target: target() });
     expect(res.ok).toBe(true);
     expect(session.acts[0]).toMatchObject({ type: "click", target: { kind: "ref", ref: "e1" } });
+    // G4: the effect-gated (reclassified-to-submit) click is gated + legible.
+    expect(res.gated).toBe(true);
+    expect(res.grantId).toBe("g1");
+    expect(res.policyClass).toBe("consequential");
   });
 
   it("EFFECT-GATE: a click on a NON-submit control stays benign (auto-granted)", async () => {

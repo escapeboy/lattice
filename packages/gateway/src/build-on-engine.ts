@@ -71,6 +71,11 @@ export class BuildOnActionAdapter implements ActionEngine {
       url: result.url ?? next.url,
       ...(result.extracted !== undefined ? { extracted: result.extracted } : {}),
       ...(result.settled === false ? { settled: false } : {}),
+      // Additive governance metadata: passthrough so the agent can tell an
+      // approved consequential action from an ungated one.
+      ...(result.gated !== undefined ? { gated: result.gated } : {}),
+      ...(result.grantId ? { grantId: result.grantId } : {}),
+      ...(result.policyClass ? { policyClass: result.policyClass } : {}),
     };
   }
 }

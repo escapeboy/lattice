@@ -46,6 +46,17 @@ export interface GovernedActionResult {
    * Omitted on a normal settled navigation and on non-navigate actions.
    */
   readonly settled?: boolean;
+  /**
+   * Governance metadata (ADDITIVE). `gated` is true when the action passed a
+   * HUMAN grant (consequential); false for a benign/read auto-grant. On a gated
+   * action, `grantId` (an opaque handle — not a secret) and `policyClass` are
+   * also carried, so an approved consequential action is legible to the agent
+   * rather than indistinguishable from an ungated one. A denial stays a typed
+   * ActionError (thrown), unchanged.
+   */
+  readonly gated?: boolean;
+  readonly grantId?: string;
+  readonly policyClass?: string;
 }
 
 /**
@@ -107,22 +118,34 @@ export class GovernedActuator {
         : command.type;
 
     const detail = this.describer?.describe(command, actionType);
-    const decision = await this.kernel.requestGrant({
+    const request = {
       actionType,
       origin: this.ctx.origin,
       sessionId: this.ctx.sessionId,
       payload: command,
       ...(detail ? { detail } : {}),
-    });
+    };
+    // Classify once so the result can tell the agent WHETHER this passed a human
+    // grant. `consequential` → the grant was a human approval (gated); read/benign
+    // → an auto-grant (not gated). Same request the gate classifies internally.
+    const policyClass = this.kernel.classify(request);
+    const decision = await this.kernel.requestGrant(request);
     if (!decision.granted) {
       throw new ActionError("prohibited", "human-grant-required", decision.reason ?? "blocked by policy");
     }
+    // Additive governance metadata: a human-approved consequential action carries
+    // gated:true + the opaque grantId + policyClass, so it is distinguishable from
+    // an ungated benign action (which carries gated:false and no grantId).
+    const meta: Pick<GovernedActionResult, "gated" | "grantId" | "policyClass"> =
+      policyClass === "consequential"
+        ? { gated: true, policyClass, ...(decision.grantId ? { grantId: decision.grantId } : {}) }
+        : { gated: false };
 
     // extract is read-tier: no engine action, just read the page text.
     if (command.type === "extract") {
       const text = await this.engine.readText();
       const url = await this.engine.currentUrl().catch(() => undefined);
-      return { ok: true, url, extracted: text };
+      return { ok: true, url, extracted: text, ...meta };
     }
 
     // 2 + 3. Re-anchor and execute.
@@ -130,7 +153,7 @@ export class GovernedActuator {
     if (!result.ok) {
       throw new ActionError(mapEngineError(result.error), "re-perceive", result.error ?? "action failed");
     }
-    return { ok: true, url: result.url };
+    return { ok: true, url: result.url, ...meta };
   }
 
   /**
