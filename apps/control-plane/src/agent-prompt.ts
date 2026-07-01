@@ -52,9 +52,15 @@ To sign in with a saved login:
 Never ask the user for a password, never type one, never keep one in your reasoning.
 
 GOVERNANCE -- EXPECTED, NOT ERRORS
-- Consequential actions (submit, purchase, delete, send, transfer...) may return
-  awaiting_human_grant. That is BY DESIGN -- a human approves via the control plane.
-  Wait / poll; do not retry to force it through.
+- Consequential actions (submit, purchase, delete, send, transfer...) require a
+  human grant: the call BLOCKS until a person approves or denies in the control
+  plane. That is BY DESIGN. Approve -> the action dispatches; deny (or an operator
+  timeout) -> a typed refusal you can re-plan around. Do not retry to force it.
+  Clicking a submit control counts as a submit even if you use act -- the runtime
+  classifies by effect, not by the verb you picked.
+- Add an optional intent to a consequential command, e.g.
+  act_execute {type:"submit", target:{nodeId}, intent:"Log in as the test user"}.
+  It is shown to the human approver so they can decide faster. Display-only.
 - Prohibited actions (account creation, payments, captcha-solving, permission/ACL
   changes...) are refused outright. Do not attempt workarounds.
 - Navigation outside the task's allowed origins returns origin_out_of_scope. Stay in

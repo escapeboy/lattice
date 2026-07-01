@@ -12,11 +12,40 @@ export function taint(raw: string): TaintedStr {
 
 export type PolicyClass = "read" | "benign" | "consequential" | "prohibited";
 
+/** One field in a grant's data preview. `masked` values never carry the secret. */
+export interface GrantFieldPreview {
+  readonly label: string;
+  readonly value: string;
+  readonly masked: boolean;
+}
+
+/**
+ * Optional human-facing enrichment for a grant request, assembled by the
+ * governed session that HAS the perception context and carried to the approval
+ * inbox so the operator sees WHAT is being approved, not a bare verb.
+ *
+ * SECURITY: this never carries an unmasked secret. Field values are
+ * agent-supplied (NOT page content) and any tainted / secret-looking value is
+ * masked at the source — the preview does not bypass tainting.
+ */
+export interface ActionDetail {
+  /** Human-readable action, e.g. "Submit form" or "Click 'Delete account'". */
+  readonly action: string;
+  /** The target control's label, when known. */
+  readonly targetLabel?: string;
+  /** Non-secret preview of the data being submitted (secrets masked). */
+  readonly fields?: ReadonlyArray<GrantFieldPreview>;
+  /** Agent-declared intent for this action — UNTRUSTED, display-only. */
+  readonly intent?: string;
+}
+
 export interface CapabilityRequest {
   readonly actionType: string;
   readonly origin: string;
   readonly sessionId: string;
   readonly payload: unknown;
+  /** Operator-facing enrichment (see ActionDetail). Optional. */
+  readonly detail?: ActionDetail;
 }
 
 export interface GrantDecision {

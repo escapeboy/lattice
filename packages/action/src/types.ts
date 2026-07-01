@@ -31,11 +31,11 @@ export type WaitCondition =
 
 export type ActionCommand =
   | { type: "navigate"; url: string }
-  | { type: "act"; target: ActionTarget }
+  | { type: "act"; target: ActionTarget; intent?: string }
   | { type: "fill"; target: ActionTarget; value: string }
   | { type: "select"; target: ActionTarget; value: string }
   | { type: "set"; target: ActionTarget; value: unknown }
-  | { type: "submit"; target: ActionTarget }
+  | { type: "submit"; target: ActionTarget; intent?: string }
   | { type: "scroll_to"; target: ActionTarget }
   | { type: "wait_for"; condition: WaitCondition }
   | { type: "extract"; query: string }

@@ -13,19 +13,31 @@
  * kernel-bypass primitives are unreachable from here by construction.
  */
 
-import type { SecurityKernel } from "@lattice/kernel";
+import type { ActionDetail, GrantFieldPreview, SecurityKernel } from "@lattice/kernel";
 import type { EngineSession } from "@lattice/engine-adapter";
 import { snapshotToIG, igDelta } from "@lattice/perception";
-import type { SnapshotIG, IGDelta, PerceptionCache, CacheResolution } from "@lattice/perception";
+import type { SnapshotIG, IGDelta, NodeId, PerceptionCache, CacheResolution } from "@lattice/perception";
 import { GovernedActuator, RecoveryExecutor, locateInIG } from "@lattice/action";
 import type {
   ActionCommand,
+  ActionDescriber,
   GovernedActionResult,
   ReAnchor,
   RateLimiterPort,
   RecoveryTarget,
   LadderResult,
 } from "@lattice/action";
+
+/** Field labels whose value must never appear in the operator preview. */
+const SECRET_LABEL = /pass|secret|cvv|card|otp|\bpin\b|token|ssn|security code/i;
+
+function humanAction(type: string, label: string | undefined, fieldCount: number): string {
+  if (type === "submit") {
+    return fieldCount > 0 ? `Submit form (${fieldCount} field${fieldCount === 1 ? "" : "s"})` : "Submit form";
+  }
+  if (type === "act") return label ? `Click '${label}'` : "Click control";
+  return label ? `${type} '${label}'` : type;
+}
 
 export interface BuildOnSessionContext {
   readonly origin: string;
@@ -40,6 +52,13 @@ export class BuildOnSession {
   private lastIG: SnapshotIG | undefined;
   private lastResolution: CacheResolution | undefined;
   private readonly actuator: GovernedActuator;
+  /**
+   * The fields the AGENT filled on the current page — the data a subsequent
+   * submit would send. Agent-supplied (never page content / vault secrets, which
+   * never pass through here), so it is safe to preview; secret-labelled fields
+   * are masked. Reset on navigation.
+   */
+  private readonly filled: GrantFieldPreview[] = [];
 
   constructor(
     private readonly engine: EngineSession,
@@ -49,7 +68,43 @@ export class BuildOnSession {
     // Re-anchoring reads the LATEST perceived snapshot's ref map, so identity
     // resolution always tracks the current DOM even across re-renders.
     const anchor: ReAnchor = { refFor: (nodeId) => this.lastIG?.refMap.get(nodeId) };
-    this.actuator = new GovernedActuator(engine, kernel, anchor, ctx);
+    // Perception-aware enrichment for the approval panel: the actuator has no
+    // labels/filled-field context; this session does.
+    const describer: ActionDescriber = {
+      describe: (command, effectiveType) => this.describeAction(command, effectiveType),
+    };
+    this.actuator = new GovernedActuator(engine, kernel, anchor, ctx, describer);
+  }
+
+  private labelFor(nodeId: NodeId): string | undefined {
+    const label = this.lastIG?.graph.nodes.get(nodeId)?.label;
+    return label && label.trim() ? label : undefined;
+  }
+
+  /** Build operator-facing detail for a consequential command (best-effort). */
+  private describeAction(command: ActionCommand, effectiveType: string): ActionDetail | undefined {
+    const targetLabel = "target" in command ? this.labelFor(command.target.nodeId) : undefined;
+    const intent = "intent" in command ? command.intent : undefined;
+    const fields = effectiveType === "submit" && this.filled.length ? this.filled.map((f) => ({ ...f })) : undefined;
+    return {
+      action: humanAction(effectiveType, targetLabel, this.filled.length),
+      ...(targetLabel ? { targetLabel } : {}),
+      ...(fields ? { fields } : {}),
+      ...(intent ? { intent } : {}),
+    };
+  }
+
+  /** Record an agent fill so a later submit can preview the form data. */
+  private recordFilled(command: ActionCommand): void {
+    if (command.type === "navigate") {
+      this.filled.length = 0;
+      return;
+    }
+    if (command.type !== "fill" && command.type !== "set") return;
+    const label = this.labelFor(command.target.nodeId) ?? "field";
+    const raw = command.type === "fill" ? command.value : String(command.value);
+    const masked = SECRET_LABEL.test(label);
+    this.filled.push({ label, value: masked ? "••••" : raw, masked });
   }
 
   /** Perceive the page as a taint-marked Lattice IG, refreshing the anchor. */
@@ -76,6 +131,9 @@ export class BuildOnSession {
   async act(command: ActionCommand): Promise<GovernedActionResult> {
     if (!this.lastIG && command.type !== "navigate") await this.perceive();
     const result = await this.actuator.execute(command);
+    // Track the submitted-data preview only after the action succeeds (execute
+    // throws on failure), so the panel reflects what was actually entered.
+    this.recordFilled(command);
     return result;
   }
 

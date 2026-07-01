@@ -14,11 +14,20 @@
  * rather than a file path into the engine.
  */
 
-import type { SecurityKernel } from "@lattice/kernel";
+import type { ActionDetail, SecurityKernel } from "@lattice/kernel";
 import type { EngineSession, Locator, SemanticAction } from "@lattice/engine-adapter";
 import type { NodeId } from "@lattice/perception";
 import { ActionError } from "./types.js";
 import type { ActionCommand } from "./types.js";
+
+/**
+ * Assembles operator-facing detail for a consequential command. Injected by the
+ * governed session, which HAS the perception context (labels, filled fields) the
+ * actuator does not. Returns undefined when there is nothing useful to add.
+ */
+export interface ActionDescriber {
+  describe(command: ActionCommand, effectiveType: string): ActionDetail | undefined;
+}
 
 /** Re-anchoring source: maps a stable NodeId to the current snapshot's ref. */
 export interface ReAnchor {
@@ -63,6 +72,8 @@ export class GovernedActuator {
     private readonly kernel: SecurityKernel,
     private readonly anchor: ReAnchor,
     private readonly ctx: ActuatorContext,
+    /** Optional perception-aware enrichment for the approval panel. */
+    private readonly describer?: ActionDescriber,
   ) {}
 
   async execute(command: ActionCommand): Promise<GovernedActionResult> {
@@ -95,11 +106,13 @@ export class GovernedActuator {
         ? "submit"
         : command.type;
 
+    const detail = this.describer?.describe(command, actionType);
     const decision = await this.kernel.requestGrant({
       actionType,
       origin: this.ctx.origin,
       sessionId: this.ctx.sessionId,
       payload: command,
+      ...(detail ? { detail } : {}),
     });
     if (!decision.granted) {
       throw new ActionError("prohibited", "human-grant-required", decision.reason ?? "blocked by policy");

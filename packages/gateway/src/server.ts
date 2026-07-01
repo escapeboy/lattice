@@ -137,6 +137,7 @@ const TOOLS = [
             value: { type: "string" },
             condition: { type: "object" },
             query: { type: "string" },
+            intent: { type: "string", description: "Optional one-line reason for a consequential action (submit/act on a submit control), shown to the human approver. Display-only." },
           },
           required: ["type"],
         },

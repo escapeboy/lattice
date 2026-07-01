@@ -2,6 +2,13 @@
  * Control Plane types — shared across inbox, policy, server, and UI.
  */
 
+/** One field in an approval's data preview. `masked` values never carry a secret. */
+export interface ApprovalField {
+  readonly label: string;
+  readonly value: string;
+  readonly masked: boolean;
+}
+
 export interface ApprovalRequest {
   readonly id: string;
   readonly sessionId: string;
@@ -10,6 +17,18 @@ export interface ApprovalRequest {
   readonly policyClass: string;
   readonly summary: string;
   readonly createdAt: number;
+  /** Human-readable action, e.g. "Submit form (2 fields)". */
+  readonly action?: string;
+  /** Target control label, when known. */
+  readonly targetLabel?: string;
+  /** Why it needs approval, e.g. "consequential — matches requireGrant rule 'submit'". */
+  readonly why?: string;
+  /** Data being submitted (secrets masked; never bypasses tainting). */
+  readonly fields?: ReadonlyArray<ApprovalField>;
+  /** Agent-declared intent — UNTRUSTED, display-only. */
+  readonly intent?: string;
+  /** Epoch ms when an unanswered request auto-resolves (timeout fallback), if set. */
+  readonly expiresAt?: number;
 }
 
 export type ApprovalOutcome = "approved" | "denied";

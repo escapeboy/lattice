@@ -85,8 +85,8 @@ export class ControlPlaneServer {
   private readonly authToken: string | null;
   private readonly replayArchivePath: string | null;
 
-  constructor(initial?: Partial<PolicyConfig>, backend?: ControlPlaneBackend, authToken?: string, options?: { replayArchivePath?: string; recentlyEndedTtlMs?: number }) {
-    this.inbox = new ApprovalInbox();
+  constructor(initial?: Partial<PolicyConfig>, backend?: ControlPlaneBackend, authToken?: string, options?: { replayArchivePath?: string; recentlyEndedTtlMs?: number; approvalTimeoutMs?: number }) {
+    this.inbox = new ApprovalInbox(options?.approvalTimeoutMs ? { timeoutMs: options.approvalTimeoutMs } : {});
     this.policy = new PolicyEditor(initial);
     this.backend = backend ?? null;
     this.authToken = authToken ?? null;
@@ -95,8 +95,10 @@ export class ControlPlaneServer {
     this.recentlyEndedTtlMs = options?.recentlyEndedTtlMs ?? 60_000;
     this.loadReplayArchive();
 
-    // Forward approval queue changes to SSE clients
-    this.inbox.onRequest(() => {
+    // Forward approval queue changes to SSE clients — onChange covers new
+    // requests AND resolutions (approve / deny / timeout fallback), so the panel
+    // clears a request the moment it is decided or auto-expires.
+    this.inbox.onChange(() => {
       this.broadcast({ type: "approvals", data: this.inbox.pendingList() });
     });
   }

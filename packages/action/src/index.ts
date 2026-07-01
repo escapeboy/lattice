@@ -15,7 +15,7 @@ export type {
 export { ActionError } from "./types.js";
 export { ActionExecutor } from "./executor.js";
 export { GovernedActuator } from "./governed-actuator.js";
-export type { ReAnchor, GovernedActionResult, ActuatorContext, RateLimiterPort } from "./governed-actuator.js";
+export type { ReAnchor, GovernedActionResult, ActuatorContext, RateLimiterPort, ActionDescriber } from "./governed-actuator.js";
 export { runLadder, locateInIG, RecoveryExecutor } from "./recovery.js";
 export { normalizeLabel, labelMatches } from "./label-match.js";
 export type {

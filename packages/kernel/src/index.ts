@@ -3,9 +3,11 @@
  */
 
 export type {
+  ActionDetail,
   AuditEvent,
   CapabilityRequest,
   EgressRequest,
+  GrantFieldPreview,
   GrantDecision,
   GrantScope,
   KernelConfig,

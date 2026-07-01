@@ -207,12 +207,21 @@ function renderSessions(){
 function renderApprovals(){
   var el=document.getElementById('approvals'); setCount('appr-count', approvals.length);
   if(!approvals.length){ el.innerHTML='<div class="empty">No pending approvals</div>'; return; }
-  el.innerHTML=approvals.map(function(a){ return '<div class="card"><div class="row1"><span class="title">'+esc(a.actionType)+
-    '</span><span class="badge b-amber">'+esc(a.policyClass)+'</span></div><div class="sub">'+esc(a.origin)+'</div>'+
-    '<div class="sub" style="margin-top:4px;color:var(--text)">'+esc(a.summary)+'</div><div class="actions">'+
-    '<button class="btn-ok" onclick="approveAppr(\\''+a.id+'\\')">Approve</button>'+
-    '<button class="btn-no" onclick="denyAppr(\\''+a.id+'\\')">Deny</button></div></div>'; }).join('');
+  el.innerHTML=approvals.map(function(a){
+    var title = a.action || a.summary || a.actionType;
+    var why = a.why ? '<div class="sub" style="margin-top:2px;opacity:.85">'+esc(a.why)+'</div>' : '';
+    var fields = (a.fields&&a.fields.length) ? '<div class="sub" style="margin-top:4px;color:var(--text)"><b>Data</b>: '+
+      a.fields.map(function(f){ return esc(f.label)+'='+(f.masked?'<span title="masked secret">••••</span>':esc(f.value)); }).join(', ')+'</div>' : '';
+    var intent = a.intent ? '<div class="sub" style="margin-top:4px">💬 <i>agent intent (untrusted)</i>: '+esc(a.intent)+'</div>' : '';
+    var exp = a.expiresAt ? '<div class="sub" style="margin-top:2px;opacity:.7">⏱ auto-denies in '+timeLeft(a.expiresAt)+'</div>' : '';
+    return '<div class="card"><div class="row1"><span class="title">'+esc(title)+
+      '</span><span class="badge b-amber">'+esc(a.policyClass)+'</span></div>'+
+      '<div class="sub">🌐 '+esc(a.origin)+'</div>'+why+fields+intent+exp+
+      '<div class="actions">'+
+      '<button class="btn-ok" onclick="approveAppr(\\''+a.id+'\\')">Approve → dispatch</button>'+
+      '<button class="btn-no" onclick="denyAppr(\\''+a.id+'\\')">Deny → block</button></div></div>'; }).join('');
 }
+function timeLeft(ts){ var s=Math.max(0,Math.round((ts-Date.now())/1000)); return s>=60?(Math.round(s/60)+'m'):(s+'s'); }
 async function approveAppr(id){ await post('/approvals/'+id+'/approve'); toast('Approved'); loadAll(); }
 async function denyAppr(id){ await post('/approvals/'+id+'/deny',{reason:prompt('Reason for denial:')||'human denied'}); toast('Denied'); loadAll(); }
 

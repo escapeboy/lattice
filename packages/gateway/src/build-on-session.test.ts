@@ -9,6 +9,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { BuildOnSession } from "./build-on-session.js";
 import { PerceptionCache } from "@lattice/perception";
 import { createSecurityKernel } from "@lattice/kernel";
+import type { CapabilityRequest, GrantDecision } from "@lattice/kernel";
 import { AgentBrowserEngine } from "@lattice/engine-adapter";
 import type {
   EngineSession,
@@ -113,6 +114,38 @@ describe("BuildOnSession — governed composition (unit)", () => {
     const realId = [...ig.graph.nodes.values()].find((n) => n.role === "button")!.id;
     await expect(session.act({ type: "submit", target: { nodeId: realId } })).rejects.toThrow();
     expect(engine.acts).toHaveLength(0);
+  });
+
+  it("enriches the grant with a human action, masked field preview, target label, and intent", async () => {
+    const engine = new FakeEngine();
+    engine.tree = '- button "Log in" [ref=e1]\n- textbox "Email" [ref=e2]\n- textbox "Password" [ref=e3]';
+    let captured: CapabilityRequest | undefined;
+    const k = createSecurityKernel({
+      allowedOrigins: [ORIGIN],
+      egressAllowlist: [],
+      prohibitedActions: [],
+      grantHandler: (req): Promise<GrantDecision> => {
+        captured = req;
+        return Promise.resolve({ granted: true, grantId: "g1" });
+      },
+    });
+    const session = new BuildOnSession(engine, k, { origin: ORIGIN, sessionId: "s1" });
+    const nodes = [...(await session.perceive()).graph.nodes.values()];
+    const byLabel = (l: string) => nodes.find((n) => n.label === l)!.id;
+
+    await session.act({ type: "fill", target: { nodeId: byLabel("Email") }, value: "ada@x.com" });
+    await session.act({ type: "fill", target: { nodeId: byLabel("Password") }, value: "hunter2" });
+    await session.act({ type: "submit", target: { nodeId: byLabel("Log in") }, intent: "Log in as the test user" });
+
+    expect(captured?.actionType).toBe("submit");
+    expect(captured?.detail?.action).toBe("Submit form (2 fields)");
+    expect(captured?.detail?.targetLabel).toBe("Log in");
+    expect(captured?.detail?.intent).toBe("Log in as the test user");
+    // The password value is MASKED — the preview never carries the secret.
+    expect(captured?.detail?.fields).toEqual([
+      { label: "Email", value: "ada@x.com", masked: false },
+      { label: "Password", value: "••••", masked: true },
+    ]);
   });
 });
 

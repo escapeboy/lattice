@@ -60,6 +60,10 @@ export interface LatticeServeConfig {
   /** Per-origin navigation rate limit (build-on path). Omitted → no throttle.
    *  Stops an agent from hammering a site (abuse / IP-ban / DoS-like load). */
   rateLimit?: BuildOnRegistryOptions["rateLimit"];
+  /** Fallback timeout (ms) for an unanswered consequential approval. When the
+   *  operator does not decide within it, the action auto-denies (paused +
+   *  audited). Omitted → hold indefinitely until a human decides. */
+  approvalTimeoutMs?: number;
 }
 
 /**
@@ -159,7 +163,10 @@ export function createLatticeCore(config: LatticeServeConfig): LatticeCore {
     egressPending: () => config.egressPolicy?.pendingList() ?? [],
     egressAllow: (origin) => config.egressPolicy?.allow(origin),
     egressDeny: (origin) => config.egressPolicy?.deny(origin),
-  }, config.controlPlaneToken, config.replayArchivePath ? { replayArchivePath: config.replayArchivePath } : undefined);
+  }, config.controlPlaneToken, {
+    ...(config.replayArchivePath ? { replayArchivePath: config.replayArchivePath } : {}),
+    ...(config.approvalTimeoutMs ? { approvalTimeoutMs: config.approvalTimeoutMs } : {}),
+  });
   ref.control = control;
 
   // Wire the kernel's consequential-action grant gate to the control-plane
