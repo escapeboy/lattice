@@ -46,7 +46,7 @@ public struct ApprovalsView: View {
         .navigationTitle("Approvals")
         .sheet(item: $denyTarget) { a in
             VStack(alignment: .leading, spacing: 12) {
-                Text("Deny: \(a.summary)").font(.headline)
+                Text("Deny: \(a.action ?? a.summary)").font(.headline)
                 TextField("Reason", text: $denyReason)
                     .textFieldStyle(.roundedBorder)
                 HStack {
@@ -58,7 +58,7 @@ public struct ApprovalsView: View {
                         Task {
                             let ok = await model.deny(a, reason: reason)
                             busy = nil
-                            outcome = (ok ? "Denied “\(a.summary)”." : (model.lastError ?? "Deny failed."), ok)
+                            outcome = (ok ? "Denied “\(a.action ?? a.summary)”." : (model.lastError ?? "Deny failed."), ok)
                         }
                     }.buttonStyle(.borderedProminent)
                 }
@@ -72,28 +72,65 @@ public struct ApprovalsView: View {
     @ViewBuilder
     private func approvalRow(_ a: Approval) -> some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(a.summary).font(.headline)
+            // WHAT: human-readable action + policy badge.
             HStack(spacing: 6) {
-                Chip(text: a.actionType, systemImage: "bolt", tint: .orange)
-                Chip(text: a.origin, systemImage: "globe")
+                Text(a.action ?? a.summary).font(.headline)
+                Chip(text: a.policyClass ?? "consequential", systemImage: "bolt", tint: .orange)
+            }
+            // WHERE + which verb: full origin (never just an icon) + action type.
+            HStack(spacing: 6) {
+                if !a.origin.isEmpty { Chip(text: a.origin, systemImage: "globe") }
+                Chip(text: a.actionType, systemImage: "arrow.right.circle")
+            }
+            // WHY it needs approval.
+            if let why = a.why, !why.isEmpty {
+                Text(why).font(.caption).foregroundStyle(.secondary)
+            }
+            // Data preview — a masked field NEVER renders a raw value.
+            if let fields = a.fields, !fields.isEmpty {
+                let data = fields.map { "\($0.label)=\($0.masked ? "••••" : $0.value)" }.joined(separator: ", ")
+                (Text("Data: ").bold() + Text(data))
+                    .font(.caption).foregroundStyle(.primary)
+            }
+            // Agent-declared intent — UNTRUSTED. Rendered verbatim (no markdown)
+            // and labelled, so page/agent text can't masquerade as UI.
+            if let intent = a.intent, !intent.isEmpty {
+                HStack(alignment: .top, spacing: 4) {
+                    Image(systemName: "bubble.left").imageScale(.small).foregroundStyle(.tertiary)
+                    (Text("agent intent (untrusted): ").italic() + Text(verbatim: intent))
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+            }
+            // Timeout fallback: when a per-policy timeout is set, show the deadline.
+            if let exp = a.expiresAt {
+                Label("auto-denies in \(timeLeft(exp))", systemImage: "clock")
+                    .font(.caption2).foregroundStyle(.tertiary)
             }
             Text("session \(a.sessionId.prefix(8))").font(.caption2).foregroundStyle(.tertiary)
+            // Explicit on-approve/deny semantics: Approve → the action dispatches;
+            // Deny → it is blocked and the agent receives a typed refusal.
             HStack(spacing: 8) {
-                Button("Approve") {
+                Button("Approve → dispatch") {
                     busy = a.id; outcome = nil
                     Task {
                         let ok = await model.approve(a)
                         busy = nil
-                        outcome = (ok ? "Approved “\(a.summary)”." : (model.lastError ?? "Approve failed."), ok)
+                        outcome = (ok ? "Approved “\(a.action ?? a.summary)” — dispatched." : (model.lastError ?? "Approve failed."), ok)
                     }
                 }
                 .buttonStyle(.borderedProminent).disabled(busy != nil)
-                Button("Deny") { denyTarget = a; denyReason = "" }
+                Button("Deny → block") { denyTarget = a; denyReason = "" }
                     .buttonStyle(.bordered).disabled(busy != nil)
                 if busy == a.id { ProgressView().controlSize(.small) }
             }
         }
         .padding(.vertical, 4)
+    }
+
+    /// Time remaining until an epoch-ms deadline, for the timeout countdown.
+    private func timeLeft(_ epochMs: Double) -> String {
+        let secs = max(0, Int((epochMs - Date().timeIntervalSince1970 * 1000) / 1000))
+        return secs >= 60 ? "\(secs / 60)m" : "\(secs)s"
     }
 
     @ViewBuilder

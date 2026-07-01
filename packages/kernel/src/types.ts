@@ -31,6 +31,10 @@ export interface GrantFieldPreview {
 export interface ActionDetail {
   /** Human-readable action, e.g. "Submit form" or "Click 'Delete account'". */
   readonly action: string;
+  /** Live page origin at the time of the action (the session task scope may be
+   *  unrestricted, so the actuator's ctx.origin can be empty — this is the real
+   *  origin the operator is approving against). */
+  readonly origin?: string;
   /** The target control's label, when known. */
   readonly targetLabel?: string;
   /** Non-secret preview of the data being submitted (secrets masked). */

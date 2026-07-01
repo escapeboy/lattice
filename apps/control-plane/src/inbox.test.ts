@@ -43,6 +43,18 @@ describe("ApprovalInbox — enriched requests", () => {
     await inbox.approve(p.id);
   });
 
+  it("prefers the live page origin (detail.origin) over an empty session task origin", () => {
+    const inbox = new ApprovalInbox();
+    void inbox.grantHandler({
+      actionType: "submit",
+      origin: "", // session task scope unrestricted → empty
+      sessionId: "s1",
+      payload: { type: "submit" },
+      detail: { action: "Submit form", origin: "https://www.saucedemo.com" },
+    });
+    expect(inbox.pendingList()[0]!.origin).toBe("https://www.saucedemo.com");
+  });
+
   it("falls back to the command payload's intent when detail carries none", () => {
     const inbox = new ApprovalInbox();
     void inbox.grantHandler(req(undefined, { type: "submit", intent: "from payload" }));

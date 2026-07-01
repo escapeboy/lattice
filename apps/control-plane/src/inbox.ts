@@ -63,7 +63,9 @@ export class ApprovalInbox {
     const approval: ApprovalRequest = {
       id,
       sessionId: req.sessionId,
-      origin: req.origin,
+      // Prefer the live page origin (detail) — the session task scope (req.origin)
+      // can be unrestricted/empty, which would leave the operator half-informed.
+      origin: detail?.origin && detail.origin.length ? detail.origin : req.origin,
       actionType: req.actionType,
       policyClass: "consequential",
       summary: detail?.action ?? `${req.actionType} on ${req.origin}`,

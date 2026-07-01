@@ -139,6 +139,8 @@ describe("BuildOnSession — governed composition (unit)", () => {
 
     expect(captured?.actionType).toBe("submit");
     expect(captured?.detail?.action).toBe("Submit form (2 fields)");
+    // The live page origin is carried even though the session task scope is empty.
+    expect(captured?.detail?.origin).toBe(ORIGIN);
     expect(captured?.detail?.targetLabel).toBe("Log in");
     expect(captured?.detail?.intent).toBe("Log in as the test user");
     // The password value is MASKED — the preview never carries the secret.

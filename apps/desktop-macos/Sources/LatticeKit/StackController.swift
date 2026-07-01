@@ -192,6 +192,11 @@ public final class StackController: ObservableObject {
             // detached agent-browser daemon when the app dies (the app's own quit
             // teardown is unreliable for a MenuBarExtra/LSUIElement app).
             "LATTICE_PARENT_PID": String(ProcessInfo.processInfo.processIdentifier),
+            // Consequential-approval fallback: an unanswered grant auto-denies
+            // (paused + audited) after this window, so a raised approval never
+            // hangs indefinitely if the operator steps away. Overridable via the
+            // app's own environment; default 5 min.
+            "LATTICE_APPROVAL_TIMEOUT_MS": ProcessInfo.processInfo.environment["LATTICE_APPROVAL_TIMEOUT_MS"] ?? "300000",
         ]
         // Vault → Keychain (D5): the 64-hex encryption key lives in the macOS
         // Keychain; the vault file is encrypted with it and persists across runs.

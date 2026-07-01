@@ -17,6 +17,8 @@
  *   LATTICE_VAULT_KEY / LATTICE_VAULT_PATH    vault encryption + persistence
  *   LATTICE_PII_FULL_ORIGINS  origins to log in full (default: all redacted)
  *   LATTICE_RATE_LIMIT_RPS    per-origin navigation rate (default 4; 0 disables; build-on only)
+ *   LATTICE_APPROVAL_TIMEOUT_MS  auto-deny an unanswered consequential approval after N ms
+ *                          (paused + audited); 0/unset → hold until a human decides
  *   LATTICE_TRACE_DIR       trace + replay-archive dir (default ./traces)
  *   LATTICE_MCP_TOKEN / LATTICE_CP_TOKEN   Bearer tokens (random+logged if unset)
  *   LATTICE_PARENT_PID      parent-death watchdog target (≤1 → disabled)
@@ -156,11 +158,18 @@ async function main(): Promise<void> {
   const rlRps = Number(process.env["LATTICE_RATE_LIMIT_RPS"] ?? 4);
   const rateLimit = Number.isFinite(rlRps) && rlRps > 0 ? { requestsPerSecond: rlRps } : undefined;
 
+  // Consequential-approval fallback: if the operator doesn't decide within this
+  // window the action auto-denies (paused + audited), so a raised grant never
+  // hangs forever. 0/unset → hold indefinitely until a human decides.
+  const apTimeout = Number(process.env["LATTICE_APPROVAL_TIMEOUT_MS"] ?? 0);
+  const approvalTimeoutMs = Number.isFinite(apTimeout) && apTimeout > 0 ? apTimeout : undefined;
+
   const { gateway, control } = createLatticeCore({
     engineKind,
     ...(cdpEngine ? { engine: cdpEngine } : {}),
     ...(buildOnEngine ? { buildOnEngine } : {}),
     ...(rateLimit ? { rateLimit } : {}),
+    ...(approvalTimeoutMs ? { approvalTimeoutMs } : {}),
     kernel,
     vault: new Vault(vaultKey, vaultPath),
     traceWriter,

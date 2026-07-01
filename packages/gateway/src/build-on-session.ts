@@ -86,12 +86,27 @@ export class BuildOnSession {
     const targetLabel = "target" in command ? this.labelFor(command.target.nodeId) : undefined;
     const intent = "intent" in command ? command.intent : undefined;
     const fields = effectiveType === "submit" && this.filled.length ? this.filled.map((f) => ({ ...f })) : undefined;
+    // The session task scope (ctx.origin) may be unrestricted (""); the live page
+    // origin is what the operator is actually approving against.
+    const origin = this.liveOrigin();
     return {
       action: humanAction(effectiveType, targetLabel, this.filled.length),
+      ...(origin ? { origin } : {}),
       ...(targetLabel ? { targetLabel } : {}),
       ...(fields ? { fields } : {}),
       ...(intent ? { intent } : {}),
     };
+  }
+
+  /** Origin of the last-perceived page URL, or undefined if not resolvable. */
+  private liveOrigin(): string | undefined {
+    const url = this.lastIG?.graph.url;
+    if (!url) return undefined;
+    try {
+      return new URL(url).origin;
+    } catch {
+      return undefined;
+    }
   }
 
   /** Record an agent fill so a later submit can preview the form data. */

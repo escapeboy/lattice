@@ -26,12 +26,31 @@ public struct SessionsSnapshot: Sendable {
     public let recentlyEnded: [RecentlyEndedSession]
 }
 
+/// One field in an approval's data preview. `masked` values NEVER carry the
+/// secret (the backend already sends "••••"); the native panel also refuses to
+/// show `value` for a masked field, so a future backend that leaked a raw value
+/// still cannot surface it here.
+public struct ApprovalField: Codable, Sendable, Hashable {
+    public let label: String
+    public let value: String
+    public let masked: Bool
+}
+
 public struct Approval: Codable, Sendable, Identifiable {
     public let id: String
     public let sessionId: String
     public let origin: String
     public let actionType: String
     public let summary: String
+    // Enriched operator context (optional — older backends omit these; Swift's
+    // synthesized Decodable maps a missing key to nil).
+    public let action: String?
+    public let policyClass: String?
+    public let why: String?
+    public let targetLabel: String?
+    public let fields: [ApprovalField]?
+    public let intent: String?
+    public let expiresAt: Double?
 }
 
 public struct Policy: Codable, Sendable, Equatable {
