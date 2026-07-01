@@ -35,6 +35,7 @@ import { NtfyTransport, Vault } from "@lattice/gateway";
 import { EgressProxy, EgressPolicy, originAllowlist } from "@lattice/egress-proxy";
 import { createLatticeCore, resolveEngineKind } from "./index.js";
 import { migrateLegacyTraces } from "./migrate-traces.js";
+import { reapEngineProcesses } from "./reap.js";
 
 function list(env: string | undefined): string[] {
   return (env ?? "").split(",").map((s) => s.trim()).filter(Boolean);
@@ -184,23 +185,20 @@ async function main(): Promise<void> {
     replayArchivePath: join(traceDir, "replay-archive.json"),
   });
 
-  // Hard-reap any agent-browser daemon we spawned. The daemon `setsid`-detaches
-  // into its own session, so it survives the backend's process group AND the
-  // desktop app's quit (whose AppKit termination callbacks are unreliable for a
-  // MenuBarExtra app). We match by the binary path under our own working dir
-  // (cwd = the backend dir, where node_modules/agent-browser is staged), so only
-  // this stack's engine is killed — never another install.
-  const engineFragment = join(process.cwd(), "node_modules", "agent-browser");
+  // Hard-reap the agent-browser DAEMON we spawned AND the Chrome it owns. The
+  // daemon `setsid`-detaches (ppid→1) and RESURRECTS Chrome if the browser is
+  // killed alone, so we kill the daemon first, then its Chrome (which runs from
+  // the system Chrome install with a `agent-browser-chrome-` user-data-dir, NOT
+  // under node_modules — the old reap missed it, and on a pnpm layout it missed
+  // the daemon too). Scoped to OUR cwd so another install's engine — e.g. the
+  // desktop app's, under /Applications — is never touched. See reap.ts.
   const reapEngineDaemons = (): void => {
-    try {
-      const out = spawnSync("ps", ["-axo", "pid=,command="], { encoding: "utf8" }).stdout ?? "";
-      for (const line of out.split("\n")) {
-        const m = line.trim().match(/^(\d+)\s+(.*)$/);
-        if (m && m[1] && m[2]?.includes(engineFragment) && Number(m[1]) !== process.pid) {
-          try { process.kill(Number(m[1]), "SIGKILL"); } catch { /* already gone */ }
-        }
-      }
-    } catch { /* ps unavailable — best effort */ }
+    reapEngineProcesses({
+      ps: () => spawnSync("ps", ["-axo", "pid=,ppid=,command="], { encoding: "utf8" }).stdout ?? "",
+      kill: (pid) => process.kill(pid, "SIGKILL"),
+      cwd: process.cwd(),
+      selfPid: process.pid,
+    });
   };
 
   let shuttingDown = false;
