@@ -118,6 +118,24 @@ describe("AgentBrowserEngine — command mapping", () => {
     expect(runner.last()).toMatchObject({ subcommand: "find", args: ["role", "button", "click"] });
   });
 
+  it("getAttr → get attr @ref <attr>, parsing the value (effect-gate submit probe)", async () => {
+    runner.responder = (sub, args) =>
+      sub === "get" && args[0] === "attr" && args[2] === "type"
+        ? { success: true, data: { type: "submit" }, error: null }
+        : { success: true, data: {}, error: null };
+    const { session } = await makeSession(runner);
+    expect(await session.getAttr!("e1", "type")).toBe("submit");
+    expect(runner.last()).toMatchObject({ subcommand: "get", args: ["attr", "@e1", "type"] });
+  });
+
+  it("getAttr → undefined when the attribute is absent or the command fails", async () => {
+    runner.next = { success: true, data: {}, error: null };
+    const { session } = await makeSession(runner);
+    expect(await session.getAttr!("e2", "type")).toBeUndefined();
+    runner.next = { success: false, data: null, error: "no element" };
+    expect(await session.getAttr!("e2", "type")).toBeUndefined();
+  });
+
   it("scroll + wait map to their commands", async () => {
     const { session } = await makeSession(runner);
     await session.act({ type: "scroll", direction: "down", px: 200 });

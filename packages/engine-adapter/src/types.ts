@@ -110,6 +110,17 @@ export interface EngineSession {
   /** Viewport screenshot as base64-encoded PNG (L3 pixel tier). */
   screenshot(): Promise<string>;
   act(action: SemanticAction): Promise<ActionResult>;
+  /**
+   * Read a single DOM attribute of a ref'd element via agent-browser's
+   * `get attr` (NON-eval, firewall-allowed — the target is never `cdp-url`).
+   * Used to classify a click on an EXPLICIT submit control
+   * (`<input type=submit|image>`, `<button type=submit>`) as the consequential
+   * `submit` regardless of the verb the agent chose, closing the verb-name gate
+   * bypass. Undefined when the attribute is absent or the engine can't answer.
+   * Optional: only the agent-browser session provides it; the effect-gate
+   * degrades to verb-classification where it is missing.
+   */
+  getAttr?(ref: string, attr: string): Promise<string | undefined>;
   close(): Promise<void>;
 }
 

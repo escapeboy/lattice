@@ -119,6 +119,21 @@ class AgentBrowserSession implements EngineSession {
     };
   }
 
+  async getAttr(ref: string, attr: string): Promise<string | undefined> {
+    // `get attr @eN <attr>` — the DOM attribute, read without eval. The firewall
+    // allows `get` for every target except `cdp-url`, so this cannot leak the CDP
+    // endpoint. Used by the effect-gate to spot explicit submit controls.
+    const env = await this.runner.run(this.id, "get", ["attr", `@${ref}`, attr]);
+    if (!env.success || !env.data) return undefined;
+    // agent-browser keys the value under the attribute name or a generic field;
+    // accept whichever the envelope uses.
+    for (const k of [attr, "value", "attr", "attribute", "result"]) {
+      const v = env.data[k];
+      if (typeof v === "string") return v;
+    }
+    return undefined;
+  }
+
   private dispatch(action: SemanticAction): Promise<AbEnvelope> {
     switch (action.type) {
       case "wait":

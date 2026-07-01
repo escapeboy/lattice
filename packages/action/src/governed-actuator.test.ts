@@ -41,6 +41,12 @@ class FakeSession implements EngineSession {
     this.acts.push(action);
     return Promise.resolve({ ok: this.nextActOk, url: "https://app.example.com/x", error: this.nextActError });
   }
+  /** Refs whose element reports type="submit" via the effect-gate probe. */
+  submitRefs = new Set<string>();
+  getAttr(ref: string, attr: string): Promise<string | undefined> {
+    if (attr === "type" && this.submitRefs.has(ref)) return Promise.resolve("submit");
+    return Promise.resolve(undefined);
+  }
   close(): Promise<void> {
     return Promise.resolve();
   }
@@ -92,6 +98,34 @@ describe("GovernedActuator — kernel gating over the semantic engine", () => {
     const res = await actuator(granting).execute({ type: "submit", target: target() });
     expect(res.ok).toBe(true);
     expect(session.acts[0]).toMatchObject({ type: "submit" });
+  });
+
+  it("EFFECT-GATE: a click (act) on an explicit submit control is classified consequential — verb-name bypass closed", async () => {
+    // The engine reports type="submit" for e1 → the click IS a form submission.
+    // No grant handler → it is blocked exactly like a `submit` verb; engine untouched.
+    session.submitRefs.add("e1");
+    await expect(actuator().execute({ type: "act", target: target() })).rejects.toBeInstanceOf(ActionError);
+    expect(session.acts).toHaveLength(0);
+  });
+
+  it("EFFECT-GATE: an approved submit-control click executes as a click", async () => {
+    session.submitRefs.add("e1");
+    const granting = createSecurityKernel({
+      allowedOrigins: ["https://app.example.com"],
+      egressAllowlist: [],
+      prohibitedActions: [],
+      grantHandler: (): Promise<GrantDecision> => Promise.resolve({ granted: true, grantId: "g1" }),
+    });
+    const res = await actuator(granting).execute({ type: "act", target: target() });
+    expect(res.ok).toBe(true);
+    expect(session.acts[0]).toMatchObject({ type: "click", target: { kind: "ref", ref: "e1" } });
+  });
+
+  it("EFFECT-GATE: a click on a NON-submit control stays benign (auto-granted)", async () => {
+    // submitRefs empty → getAttr type = undefined → benign, no grant needed.
+    const res = await actuator().execute({ type: "act", target: target() });
+    expect(res.ok).toBe(true);
+    expect(session.acts[0]).toMatchObject({ type: "click" });
   });
 
   it("consequential submit WITHOUT a grant handler is blocked, engine never touched", async () => {
