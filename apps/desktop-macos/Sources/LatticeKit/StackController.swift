@@ -212,6 +212,13 @@ public final class StackController: ObservableObject {
             // app's own environment; default 5 min.
             "LATTICE_APPROVAL_TIMEOUT_MS": ProcessInfo.processInfo.environment["LATTICE_APPROVAL_TIMEOUT_MS"] ?? "300000",
         ]
+        // A LaunchServices-launched app inherits launchd's minimal PATH
+        // (/usr/bin:/bin:/usr/sbin:/sbin) — without Homebrew's bin dirs the
+        // backend's on-PATH CLI lookups for the vault providers (`op` for
+        // 1Password, `bw` for Bitwarden) fail even when the tool is installed.
+        // Prepend the standard Homebrew locations so provider detection works.
+        let inheritedPath = ProcessInfo.processInfo.environment["PATH"] ?? "/usr/bin:/bin:/usr/sbin:/sbin"
+        env["PATH"] = "/opt/homebrew/bin:/usr/local/bin:" + inheritedPath
         // Vault → Keychain (D5): the 64-hex encryption key lives in the macOS
         // Keychain; the vault file is encrypted with it and persists across runs.
         // If the Keychain is unavailable, fall back to an ephemeral vault (no
