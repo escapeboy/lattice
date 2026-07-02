@@ -12,6 +12,9 @@
  *   LATTICE_ALLOWED_ORIGINS / LATTICE_EGRESS_ALLOWLIST / LATTICE_PROHIBITED
  *   LATTICE_EGRESS_LEARN    "1" = ask-to-allow egress (only mode that builds egressPolicy)
  *   LATTICE_EGRESS_ALLOW_SUBDOMAINS  "1" = also allow subdomains of allowed hosts (same-site)
+ *   LATTICE_SEARCH_PROVIDER "ddg" (default, zero-key) | "brave" | "searxng" — search_query backend
+ *   LATTICE_BRAVE_KEY       Brave Search API key (required for provider=brave)
+ *   LATTICE_SEARXNG_URL     remote SearXNG instance base URL (required for provider=searxng)
  *   LATTICE_NTFY_BASE / LATTICE_HANDOFF_KEY   handoff push + HMAC signing key
  *                          (unset → random per-process key: signatures break on restart)
  *   LATTICE_VAULT_KEY / LATTICE_VAULT_PATH    vault encryption + persistence
@@ -33,6 +36,7 @@ import { AgentBrowserEngine } from "@lattice/engine-adapter";
 import { SecurityKernelImpl } from "@lattice/kernel";
 import { NtfyTransport, Vault } from "@lattice/gateway";
 import { EgressProxy, EgressPolicy, originAllowlist } from "@lattice/egress-proxy";
+import { resolveSearchConfig, createSearchProvider, proxiedFetch, SearchError, type SearchConfig, type SearchProvider } from "@lattice/search";
 import { createLatticeCore, resolveEngineKind } from "./index.js";
 import { migrateLegacyTraces } from "./migrate-traces.js";
 import { reapEngineProcesses } from "./reap.js";
@@ -66,6 +70,26 @@ async function main(): Promise<void> {
   // sees the destination, not the initiating page); provenance stays kernel-level.
   const allowedOrigins = list(process.env["LATTICE_ALLOWED_ORIGINS"]);
   const egressAllow = list(process.env["LATTICE_EGRESS_ALLOWLIST"]);
+
+  // Search provider (env-selected; DDG default = zero key, zero sidecar). The
+  // config resolves BEFORE the proxy so the provider's upstream endpoints can be
+  // seeded as EXPLICIT egress-allowlist entries — search egress goes THROUGH the
+  // firewall like browser traffic, never around it. A misconfigured opt-in
+  // provider degrades to a typed search_query error, not a broken boot (the
+  // desktop .dmg must come up regardless).
+  let searchConfig: SearchConfig | undefined;
+  let searchConfigError: string | undefined;
+  try {
+    searchConfig = resolveSearchConfig({
+      provider: process.env["LATTICE_SEARCH_PROVIDER"],
+      braveKey: process.env["LATTICE_BRAVE_KEY"],
+      searxngUrl: process.env["LATTICE_SEARXNG_URL"],
+    });
+  } catch (e) {
+    searchConfigError = e instanceof SearchError ? e.message : String(e);
+    console.error(`Search provider disabled: ${searchConfigError}`);
+  }
+  const searchEndpoints = searchConfig?.endpointOrigins ?? [];
   // Ask-to-allow (learn) mode: the proxy is ON even with no allowlist, and an
   // unknown origin is BLOCKED but surfaced as pending for the operator to
   // allow/deny (still default-deny — nothing leaks until a human says yes).
@@ -76,15 +100,27 @@ async function main(): Promise<void> {
   let egressProxy: EgressProxy | undefined;
   let egressPolicy: EgressPolicy | undefined;
   let proxyUrl: string | undefined;
+  // The selected search provider's endpoints are ALLOWLIST ENTRIES (visible,
+  // auditable), so search egress rides the same default-deny firewall.
   if (egressLearn) {
-    egressPolicy = new EgressPolicy([...allowedOrigins, ...egressAllow], true);
+    egressPolicy = new EgressPolicy([...allowedOrigins, ...egressAllow, ...searchEndpoints], true);
     egressProxy = new EgressProxy({ allow: egressPolicy.decide });
     proxyUrl = (await egressProxy.start()).url;
     console.error(`Egress firewall active (ask-to-allow) — new origins are blocked and surfaced for approval. Proxy: ${proxyUrl}`);
   } else if (allowedOrigins.length > 0 || egressAllow.length > 0) {
-    egressProxy = new EgressProxy({ allow: originAllowlist(allowedOrigins, egressAllow, { allowSubdomains }) });
+    egressProxy = new EgressProxy({ allow: originAllowlist(allowedOrigins, [...egressAllow, ...searchEndpoints], { allowSubdomains }) });
     proxyUrl = (await egressProxy.start()).url;
     console.error(`Egress firewall active — browser traffic gated through ${proxyUrl} (origin allowlist).`);
+  }
+
+  // Provider transport: with the firewall up, search fetches go THROUGH the
+  // egress proxy (same chokepoint as browser traffic — a blocked endpoint is a
+  // typed search_egress_blocked error). No firewall → direct fetch, matching
+  // the dev-unrestricted posture of browser traffic.
+  let search: SearchProvider | undefined;
+  if (searchConfig) {
+    search = createSearchProvider(searchConfig, proxyUrl ? proxiedFetch(proxyUrl) : undefined);
+    console.error(`Search provider: ${search.id}${proxyUrl ? " (egress via firewall proxy)" : ""}`);
   }
 
   let cdpEngine: ReturnType<typeof createEngineAdapter> | undefined;
@@ -178,6 +214,8 @@ async function main(): Promise<void> {
     ...(ntfyBase ? { handoffTransport: new NtfyTransport(ntfyBase) } : {}),
     ...(handoffKey ? { handoffSigningKey: handoffKey } : {}),
     ...(egressPolicy ? { egressPolicy } : {}),
+    ...(search ? { search } : {}),
+    ...(searchConfigError ? { searchConfigError } : {}),
     controlPlaneToken: cpToken,
     mcpToken,
     // Persist the redacted Replay archive next to the trace notes so the Replay

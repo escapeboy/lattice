@@ -27,6 +27,7 @@
     "@lattice/observability": "workspace:*",
     "@lattice/perception": "workspace:*",
     "@lattice/runtime": "workspace:*",
+    "@lattice/search": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0"
   },
   "devDependencies": {

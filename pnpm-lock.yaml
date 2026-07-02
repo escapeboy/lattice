@@ -118,6 +118,9 @@ importers:
       '@lattice/observability':
         specifier: workspace:*
         version: link:../../packages/observability
+      '@lattice/search':
+        specifier: workspace:*
+        version: link:../../packages/search
     devDependencies:
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
@@ -255,6 +258,9 @@ importers:
       '@lattice/runtime':
         specifier: workspace:*
         version: link:../runtime
+      '@lattice/search':
+        specifier: workspace:*
+        version: link:../search
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@4.4.3)
@@ -388,6 +394,21 @@ importers:
         specifier: workspace:*
         version: link:../perception
     devDependencies:
+      '@types/node':
+        specifier: 'catalog:'
+        version: 22.20.0
+      typescript:
+        specifier: 'catalog:'
+        version: 5.9.3
+      vitest:
+        specifier: 'catalog:'
+        version: 3.2.6(@types/node@22.20.0)
+
+  packages/search:
+    devDependencies:
+      '@lattice/egress-proxy':
+        specifier: workspace:*
+        version: link:../egress-proxy
       '@types/node':
         specifier: 'catalog:'
         version: 22.20.0

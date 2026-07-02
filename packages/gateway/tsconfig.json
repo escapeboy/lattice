@@ -12,6 +12,7 @@
     { "path": "../action" },
     { "path": "../runtime" },
     { "path": "../kernel" },
-    { "path": "../observability" }
+    { "path": "../observability" },
+    { "path": "../search" }
   ]
 }

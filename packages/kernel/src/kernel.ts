@@ -56,6 +56,9 @@ const READ_DEFAULTS = new Set([
   "extract",
   "perceive",
   "snapshot",
+  // search_query: benign read — results are tainted third-party content, and
+  // NAVIGATING to a result goes through checkNavigation/gating separately.
+  "search",
 ]);
 
 // Action types that are benign by default

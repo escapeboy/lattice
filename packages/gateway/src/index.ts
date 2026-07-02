@@ -14,6 +14,7 @@ import type { BuildOnRegistryOptions } from "./build-on-registry.js";
 import type { NotificationTransport } from "./handoff.js";
 import type { GatewayObserver } from "./server.js";
 import type { Vault } from "./vault.js";
+import type { SearchProvider } from "@lattice/search";
 
 export { GatewayServer } from "./server.js";
 export type { GatewayObserver, SessionViewEvent } from "./server.js";
@@ -57,6 +58,10 @@ export interface GatewayConfig {
   observer?: GatewayObserver;
   /** Bearer token required on the /mcp endpoint when set (A2). */
   mcpToken?: string;
+  /** Web-search provider backing search_query (results tainted by construction). */
+  search?: SearchProvider;
+  /** Boot-time search misconfiguration to surface in the tool's typed error. */
+  searchConfigError?: string;
 }
 
 export function createAgentGateway(config: GatewayConfig): GatewayServer {
@@ -66,6 +71,8 @@ export function createAgentGateway(config: GatewayConfig): GatewayServer {
     ...(config.vault ? { vault: config.vault } : {}),
     ...(config.observer ? { observer: config.observer } : {}),
     ...(config.mcpToken ? { mcpToken: config.mcpToken } : {}),
+    ...(config.search ? { search: config.search } : {}),
+    ...(config.searchConfigError ? { searchConfigError: config.searchConfigError } : {}),
   });
 }
 
@@ -81,6 +88,10 @@ export interface BuildOnGatewayConfig {
   registry?: BuildOnRegistryOptions;
   /** Bearer token required on the /mcp endpoint when set (A2). */
   mcpToken?: string;
+  /** Web-search provider backing search_query (results tainted by construction). */
+  search?: SearchProvider;
+  /** Boot-time search misconfiguration to surface in the tool's typed error. */
+  searchConfigError?: string;
 }
 
 /**
@@ -97,5 +108,7 @@ export function createBuildOnGateway(config: BuildOnGatewayConfig): GatewayServe
     ...(config.vault ? { vault: config.vault } : {}),
     ...(config.observer ? { observer: config.observer } : {}),
     ...(config.mcpToken ? { mcpToken: config.mcpToken } : {}),
+    ...(config.search ? { search: config.search } : {}),
+    ...(config.searchConfigError ? { searchConfigError: config.searchConfigError } : {}),
   });
 }

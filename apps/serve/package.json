@@ -26,7 +26,8 @@
     "@lattice/gateway": "workspace:*",
     "@lattice/kernel": "workspace:*",
     "@lattice/observability": "workspace:*",
-    "@lattice/egress-proxy": "workspace:*"
+    "@lattice/egress-proxy": "workspace:*",
+    "@lattice/search": "workspace:*"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",

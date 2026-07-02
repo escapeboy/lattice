@@ -44,6 +44,9 @@ export interface EgressProxyOptions {
 
 export class EgressProxy {
   private server: Server | null = null;
+  /** Live CONNECT tunnel sockets — hijacked from the http server, so close()/
+   *  closeAllConnections() no longer see them; stop() must drop them itself. */
+  private readonly tunnels = new Set<Socket>();
   /** Every decision made on the live path — for audit and the e2e assertion. */
   readonly decisions: EgressDecision[] = [];
 
@@ -65,6 +68,12 @@ export class EgressProxy {
     const server = this.server;
     if (!server) return;
     this.server = null;
+    // Teardown must be deterministic: `close()` alone waits for every open
+    // connection (an idle keep-alive client or a lingering CONNECT tunnel can
+    // hold it forever). stop() means stop — drop them.
+    for (const s of this.tunnels) s.destroy();
+    this.tunnels.clear();
+    server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 
@@ -127,8 +136,20 @@ export class EgressProxy {
       serverSocket.pipe(clientSocket);
       clientSocket.pipe(serverSocket);
     });
-    serverSocket.on("error", () => clientSocket.destroy());
-    clientSocket.on("error", () => serverSocket.destroy());
+    // Track the tunnel pair for stop(): once hijacked, the http server no
+    // longer manages these sockets. Either side closing tears down BOTH (a
+    // half-closed peer must not leave its twin dangling).
+    this.tunnels.add(clientSocket).add(serverSocket);
+    const teardown = (): void => {
+      this.tunnels.delete(clientSocket);
+      this.tunnels.delete(serverSocket);
+      clientSocket.destroy();
+      serverSocket.destroy();
+    };
+    serverSocket.on("error", teardown);
+    clientSocket.on("error", teardown);
+    serverSocket.on("close", teardown);
+    clientSocket.on("close", teardown);
   }
 }
 

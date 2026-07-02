@@ -15,6 +15,7 @@ import type { SecurityKernel } from "@lattice/kernel";
 import { ControlPlaneServer } from "@lattice/control-plane";
 import { emitToSvod, type SvodWriteFn, type PiiPolicy } from "@lattice/observability";
 import type { EgressPolicy } from "@lattice/egress-proxy";
+import type { SearchProvider } from "@lattice/search";
 import { importChromeCookies, listChromeProfiles } from "./chrome-import.js";
 
 export interface LatticeCore {
@@ -64,6 +65,12 @@ export interface LatticeServeConfig {
    *  operator does not decide within it, the action auto-denies (paused +
    *  audited). Omitted → hold indefinitely until a human decides. */
   approvalTimeoutMs?: number;
+  /** Web-search provider backing search_query. The caller wires its egress:
+   *  when the firewall is active the provider MUST fetch through the proxy
+   *  (proxiedFetch), with its endpoints as explicit allowlist entries. */
+  search?: SearchProvider;
+  /** Boot-time search misconfiguration to surface in the tool's typed error. */
+  searchConfigError?: string;
 }
 
 /**
@@ -108,6 +115,8 @@ export function createLatticeCore(config: LatticeServeConfig): LatticeCore {
     ...(config.handoffSigningKey ? { handoffSigningKey: config.handoffSigningKey } : {}),
     ...(config.vault ? { vault: config.vault } : {}),
     ...(config.mcpToken ? { mcpToken: config.mcpToken } : {}),
+    ...(config.search ? { search: config.search } : {}),
+    ...(config.searchConfigError ? { searchConfigError: config.searchConfigError } : {}),
   };
 
   // Dual-stack engine selection (ADR 0002): the build-on path runs agent-browser
