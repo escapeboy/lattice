@@ -6,6 +6,7 @@ public enum ControlPlaneSection: String, CaseIterable, Identifiable {
     case policy = "Policy"
     case replay = "Replay"
     case personas = "Personas & Vault"
+    case search = "Search"
     public var id: String { rawValue }
     var systemImage: String {
         switch self {
@@ -14,6 +15,7 @@ public enum ControlPlaneSection: String, CaseIterable, Identifiable {
         case .policy: return "doc.text"
         case .replay: return "clock.arrow.circlepath"
         case .personas: return "person.crop.circle"
+        case .search: return "magnifyingglass"
         }
     }
 }
@@ -29,7 +31,7 @@ public struct ControlPlaneRoot: View {
     public var body: some View {
         Group {
             if let model = holder.model {
-                ControlPlaneView(model: model, mcpClient: stack.client)
+                ControlPlaneView(model: model, mcpClient: stack.client, stack: stack)
             } else {
                 VStack(spacing: 10) {
                     ProgressView()
@@ -70,12 +72,15 @@ public struct ControlPlaneRoot: View {
 public struct ControlPlaneView: View {
     @ObservedObject var model: ControlPlaneModel
     let mcpClient: MCPClient?
+    /// The stack owner — the Search tab persists settings on it and restarts it.
+    let stack: StackController?
     @State private var section: ControlPlaneSection = .theater
     @State private var promptCopied = false
 
-    public init(model: ControlPlaneModel, mcpClient: MCPClient?) {
+    public init(model: ControlPlaneModel, mcpClient: MCPClient?, stack: StackController? = nil) {
         self.model = model
         self.mcpClient = mcpClient
+        self.stack = stack
     }
 
     public var body: some View {
@@ -108,6 +113,12 @@ public struct ControlPlaneView: View {
         case .policy: PolicyView(model: model)
         case .replay: ReplayView(model: model)
         case .personas: PersonasView(model: model)
+        case .search:
+            if let stack {
+                SearchSettingsView(stack: stack)
+            } else {
+                Text("Search settings need the running stack.").foregroundStyle(.secondary)
+            }
         }
     }
 

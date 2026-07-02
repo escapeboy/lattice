@@ -160,6 +160,20 @@ public final class StackController: ObservableObject {
         startStack()
     }
 
+    /// Persist the search-provider settings and restart the stack so the new
+    /// env (LATTICE_SEARCH_PROVIDER / LATTICE_BRAVE_KEY / LATTICE_SEARXNG_URL)
+    /// takes effect — the backend reads them at boot. `braveKey` nil = keep the
+    /// stored key; a non-empty value replaces it (Keychain, never UserDefaults).
+    public func applySearchSettings(provider: DesktopSearch.Provider, braveKey: String?, searxngUrl: String) {
+        DesktopSearch.provider = provider
+        DesktopSearch.searxngUrl = searxngUrl
+        if let key = braveKey, !key.trimmingCharacters(in: .whitespaces).isEmpty {
+            DesktopSearch.setBraveKey(key)
+        }
+        if supervisor != nil { stopStack() }
+        startStack()
+    }
+
     /// Tear the stack down cleanly (zero orphans). Safe to call on app quit.
     public func stopStack() {
         supervisor?.stop()
@@ -224,6 +238,9 @@ public final class StackController: ObservableObject {
         // because the app proxy breaks HTTPS (see DesktopEgress). Merged anyway so
         // re-enabling later (post HTTPS-gating) is a one-line change there.
         env.merge(DesktopEgress.environment()) { _, new in new }
+        // search_query provider selection (Search tab). The Brave key comes from
+        // the Keychain and rides the env ONLY when Brave is the selected provider.
+        env.merge(DesktopSearch.environment()) { _, new in new }
         return env
     }
 }
