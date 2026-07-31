@@ -262,4 +262,47 @@ describe("GovernedActuator — per-origin rate limiting (P1.2)", () => {
     expect(events).toEqual(["acquire:https://site.example/a", "released"]);
     expect(session.navs).toEqual(["https://site.example/a"]);
   });
+
+});
+
+describe("GovernedActuator — robots.txt navigation gate (obey-robots)", () => {
+  const openKernel = () => createSecurityKernel({ allowedOrigins: [], egressAllowlist: [], prohibitedActions: [] });
+
+  it("REFUSES a disallowed navigation before hitting the engine", async () => {
+    const session = new FakeSession();
+    const checked: string[] = [];
+    const robots = { allowed: (url: string) => { checked.push(url); return Promise.resolve(false); } };
+    const act = new GovernedActuator(session, openKernel(), anchor, { origin: "", sessionId: "s1", robots });
+    const err = await act.execute({ type: "navigate", url: "https://site.example/blocked" }).then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(ActionError);
+    expect((err as ActionError).code).toBe("prohibited");
+    expect((err as ActionError).message).toContain("robots_disallowed");
+    // The engine never saw the navigation — the gate is a real chokepoint.
+    expect(session.navs).toHaveLength(0);
+    expect(checked).toEqual(["https://site.example/blocked"]);
+  });
+
+  it("ALLOWS a permitted navigation and runs BEFORE the rate limiter", async () => {
+    const session = new FakeSession();
+    const order: string[] = [];
+    const robots = { allowed: (): Promise<boolean> => { order.push("robots"); return Promise.resolve(true); } };
+    const rateLimiter = { acquire: (): Promise<void> => { order.push("acquire"); return Promise.resolve(); }, report: (): void => undefined };
+    const act = new GovernedActuator(session, openKernel(), anchor, { origin: "", sessionId: "s1", robots, rateLimiter });
+    const res = await act.execute({ type: "navigate", url: "https://site.example/ok" });
+    expect(res.ok).toBe(true);
+    expect(session.navs).toEqual(["https://site.example/ok"]);
+    // robots is consulted before a rate-limit slot is spent on a doomed nav.
+    expect(order).toEqual(["robots", "acquire"]);
+  });
+
+  it("no robots gate wired → navigation proceeds unchanged", async () => {
+    const session = new FakeSession();
+    const act = new GovernedActuator(session, openKernel(), anchor, { origin: "", sessionId: "s1" });
+    const res = await act.execute({ type: "navigate", url: "https://site.example/next" });
+    expect(res.ok).toBe(true);
+    expect(session.navs).toEqual(["https://site.example/next"]);
+  });
 });

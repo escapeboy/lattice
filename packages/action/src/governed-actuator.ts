@@ -69,12 +69,25 @@ export interface RateLimiterPort {
   report(url: string, status: number): void;
 }
 
+/**
+ * Optional robots.txt navigation gate (borrowed from Lightpanda's
+ * `--obey-robots`). `@lattice/robots`' RobotsChecker satisfies it; the serve
+ * wiring injects one when `LATTICE_OBEY_ROBOTS` is set. Structural port so the
+ * action package need not depend on @lattice/robots.
+ */
+export interface RobotsCheckerPort {
+  /** Resolve whether the configured product token may fetch `url`. */
+  allowed(url: string): Promise<boolean>;
+}
+
 export interface ActuatorContext {
   /** Origin the task is scoped to (for kernel classification/egress). */
   readonly origin: string;
   readonly sessionId: string;
   /** Optional shared per-origin rate limiter; navigations acquire a slot first. */
   readonly rateLimiter?: RateLimiterPort;
+  /** Optional robots.txt gate; when present, a disallowed navigation is refused. */
+  readonly robots?: RobotsCheckerPort;
 }
 
 export class GovernedActuator {
@@ -93,6 +106,14 @@ export class GovernedActuator {
     if (command.type === "navigate") {
       if (!this.kernel.checkNavigation(command.url)) {
         throw new ActionError("navigation_interrupted", "re-perceive", `origin_out_of_scope: ${command.url}`);
+      }
+      // Politeness: honor the target origin's robots.txt when obey-robots is
+      // wired (opt-in). A disallowed URL is a terminal refusal — `prohibited`,
+      // NOT navigation_interrupted, so the agent does not spin in a re-perceive
+      // retry loop over a page it will never be allowed to fetch. The robots
+      // fetch itself rides the injected (governed) transport.
+      if (this.ctx.robots && !(await this.ctx.robots.allowed(command.url))) {
+        throw new ActionError("prohibited", undefined, `robots_disallowed: ${command.url}`);
       }
       // Politeness: wait for a per-origin slot before hitting the site (P1.2).
       await this.ctx.rateLimiter?.acquire(command.url);

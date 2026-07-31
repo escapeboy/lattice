@@ -27,6 +27,7 @@
     "@lattice/kernel": "workspace:*",
     "@lattice/observability": "workspace:*",
     "@lattice/egress-proxy": "workspace:*",
+    "@lattice/robots": "workspace:*",
     "@lattice/search": "workspace:*"
   },
   "devDependencies": {

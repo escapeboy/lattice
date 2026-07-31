@@ -248,6 +248,9 @@ public final class StackController: ObservableObject {
         // search_query provider selection (Search tab). The Brave key comes from
         // the Keychain and rides the env ONLY when Brave is the selected provider.
         env.merge(DesktopSearch.environment()) { _, new in new }
+        // robots.txt navigation gate (Search tab toggle). Ships LATTICE_OBEY_ROBOTS
+        // only when enabled; off by default (empty env).
+        env.merge(DesktopRobots.environment()) { _, new in new }
         return env
     }
 }

@@ -12,6 +12,7 @@ import type { SemanticEngine } from "@lattice/engine-adapter";
 import { TraceRecorder } from "@lattice/observability";
 import type { SessionTrace } from "@lattice/observability";
 import type { SnapshotData, RateLimitConfig } from "@lattice/runtime";
+import type { RobotsCheckerPort } from "@lattice/action";
 import { OriginRateLimiter } from "@lattice/runtime";
 import { PerceptionCache } from "@lattice/perception";
 import { BuildOnSession } from "./build-on-session.js";
@@ -29,6 +30,8 @@ export interface BuildOnRegistryOptions {
   rateLimit?: RateLimitConfig;
   /** Per-origin perception cache (P2.2): amortizes the skeleton cost on revisits. */
   perceptionCache?: boolean;
+  /** robots.txt navigation gate (opt-in). Off when omitted. */
+  robots?: RobotsCheckerPort;
 }
 
 /** Thrown when the session governor's budget is exhausted. */
@@ -76,6 +79,7 @@ export class BuildOnSessionRegistry implements SessionProvider {
       sessionId: id,
       ...(this.rateLimiter ? { rateLimiter: this.rateLimiter } : {}),
       ...(this.perceptionCache ? { cache: this.perceptionCache } : {}),
+      ...(this.opts.robots ? { robots: this.opts.robots } : {}),
     });
     const perception = new BuildOnPerceptionAdapter(buildOn);
     const action = new BuildOnActionAdapter(buildOn, perception);

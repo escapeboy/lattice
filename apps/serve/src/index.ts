@@ -61,6 +61,9 @@ export interface LatticeServeConfig {
   /** Per-origin navigation rate limit (build-on path). Omitted → no throttle.
    *  Stops an agent from hammering a site (abuse / IP-ban / DoS-like load). */
   rateLimit?: BuildOnRegistryOptions["rateLimit"];
+  /** robots.txt navigation gate (build-on path). Omitted → not enforced. When
+   *  present, a navigation the origin's robots.txt disallows is refused. */
+  robots?: BuildOnRegistryOptions["robots"];
   /** Fallback timeout (ms) for an unanswered consequential approval. When the
    *  operator does not decide within it, the action auto-denies (paused +
    *  audited). Omitted → hold indefinitely until a human decides. */
@@ -127,7 +130,14 @@ export function createLatticeCore(config: LatticeServeConfig): LatticeCore {
     gateway = createBuildOnGateway({
       engine: config.buildOnEngine,
       ...shared,
-      ...(config.rateLimit ? { registry: { rateLimit: config.rateLimit } } : {}),
+      ...(config.rateLimit || config.robots
+        ? {
+            registry: {
+              ...(config.rateLimit ? { rateLimit: config.rateLimit } : {}),
+              ...(config.robots ? { robots: config.robots } : {}),
+            },
+          }
+        : {}),
     });
   } else {
     if (!config.engine) throw new Error('engineKind "cdp" requires a launched engine');

@@ -20,6 +20,9 @@
  *   LATTICE_VAULT_KEY / LATTICE_VAULT_PATH    vault encryption + persistence
  *   LATTICE_PII_FULL_ORIGINS  origins to log in full (default: all redacted)
  *   LATTICE_RATE_LIMIT_RPS    per-origin navigation rate (default 4; 0 disables; build-on only)
+ *   LATTICE_OBEY_ROBOTS       "1" = honor the target's robots.txt before navigating (build-on; off by default)
+ *   LATTICE_ROBOTS_UA         product token matched against robots User-agent groups (default "Lattice")
+ *   LATTICE_ROBOTS_FAIL_CLOSED  "1" = refuse navigation when robots is unreachable/5xx (default fail-open)
  *   LATTICE_APPROVAL_TIMEOUT_MS  auto-deny an unanswered consequential approval after N ms
  *                          (paused + audited); 0/unset → hold until a human decides
  *   LATTICE_TRACE_DIR       trace + replay-archive dir (default ./traces)
@@ -37,6 +40,7 @@ import { SecurityKernelImpl } from "@lattice/kernel";
 import { NtfyTransport, Vault } from "@lattice/gateway";
 import { EgressProxy, EgressPolicy, originAllowlist } from "@lattice/egress-proxy";
 import { resolveSearchConfig, createSearchProvider, proxiedFetch, SearchError, type SearchConfig, type SearchProvider } from "@lattice/search";
+import { RobotsChecker } from "@lattice/robots";
 import { createLatticeCore, resolveEngineKind } from "./index.js";
 import { migrateLegacyTraces } from "./migrate-traces.js";
 import { reapEngineProcesses } from "./reap.js";
@@ -201,11 +205,30 @@ async function main(): Promise<void> {
   const apTimeout = Number(process.env["LATTICE_APPROVAL_TIMEOUT_MS"] ?? 0);
   const approvalTimeoutMs = Number.isFinite(apTimeout) && apTimeout > 0 ? apTimeout : undefined;
 
+  // robots.txt navigation gate (build-on path), opt-in via LATTICE_OBEY_ROBOTS.
+  // The robots.txt fetch rides the SAME transport as browser/search traffic —
+  // through the egress proxy when the firewall is up — so the check is governed,
+  // never an ungoverned side-channel. Fail-open by default (a robots hiccup does
+  // not block an operator navigation); LATTICE_ROBOTS_FAIL_CLOSED=1 for strict.
+  const bool = (v: string | undefined) => /^(1|true|yes|on)$/i.test(v ?? "");
+  const robotsUa = process.env["LATTICE_ROBOTS_UA"];
+  const robots = bool(process.env["LATTICE_OBEY_ROBOTS"])
+    ? new RobotsChecker({
+        fetch: proxyUrl
+          ? proxiedFetch(proxyUrl)
+          : (url, init) => fetch(url, init).then((r) => ({ status: r.status, ok: r.ok, text: () => r.text() })),
+        ...(robotsUa ? { userAgent: robotsUa } : {}),
+        failClosed: bool(process.env["LATTICE_ROBOTS_FAIL_CLOSED"]),
+      })
+    : undefined;
+  if (robots) console.error(`robots.txt gate active (obey-robots)${proxyUrl ? " (fetch via firewall proxy)" : ""}.`);
+
   const { gateway, control } = createLatticeCore({
     engineKind,
     ...(cdpEngine ? { engine: cdpEngine } : {}),
     ...(buildOnEngine ? { buildOnEngine } : {}),
     ...(rateLimit ? { rateLimit } : {}),
+    ...(robots ? { robots } : {}),
     ...(approvalTimeoutMs ? { approvalTimeoutMs } : {}),
     kernel,
     vault: new Vault(vaultKey, vaultPath),

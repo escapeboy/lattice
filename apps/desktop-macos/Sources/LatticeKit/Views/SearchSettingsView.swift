@@ -12,6 +12,7 @@ public struct SearchSettingsView: View {
     @State private var braveKeyInput: String = ""
     @State private var hasStoredBraveKey: Bool = DesktopSearch.hasBraveKey
     @State private var searxngUrl: String = DesktopSearch.searxngUrl
+    @State private var obeyRobots: Bool = DesktopRobots.obey
     @State private var applied = false
 
     public init(stack: StackController) { self.stack = stack }
@@ -61,6 +62,12 @@ public struct SearchSettingsView: View {
                 }
             }
 
+            Section("Web crawling") {
+                Toggle("Obey robots.txt when navigating", isOn: $obeyRobots)
+                Text("When on, the engine honors each site's robots.txt before navigating to a URL — a politeness gate for crawl/research use. The robots.txt check rides the same governed transport as browser traffic. Off by default; an operator-driven navigation is not a crawler.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section {
                 HStack {
                     Button(applied ? "Applied — restarting stack" : "Apply & restart stack") { apply() }
@@ -88,6 +95,9 @@ public struct SearchSettingsView: View {
 
     private func apply() {
         applied = true
+        // Persist the robots toggle before the restart so backendEnvironment
+        // picks it up on the fresh stack (same boot as the search settings).
+        DesktopRobots.obey = obeyRobots
         stack.applySearchSettings(
             provider: provider,
             braveKey: braveKeyInput.isEmpty ? nil : braveKeyInput,

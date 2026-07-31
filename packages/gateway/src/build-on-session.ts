@@ -24,6 +24,7 @@ import type {
   GovernedActionResult,
   ReAnchor,
   RateLimiterPort,
+  RobotsCheckerPort,
   RecoveryTarget,
   LadderResult,
 } from "@lattice/action";
@@ -46,6 +47,8 @@ export interface BuildOnSessionContext {
   readonly rateLimiter?: RateLimiterPort;
   /** Optional shared per-origin perception cache (P2.2). */
   readonly cache?: PerceptionCache;
+  /** Optional shared robots.txt gate; a disallowed navigation is refused. */
+  readonly robots?: RobotsCheckerPort;
 }
 
 export class BuildOnSession {
