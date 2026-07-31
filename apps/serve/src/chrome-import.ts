@@ -69,10 +69,12 @@ const chromeRoot = (): string =>
 export function listChromeProfiles(): Array<{ dir: string; name: string }> {
   const root = chromeRoot();
   if (!existsSync(root)) return [];
-  let displayNames: Record<string, string> = {};
+  const displayNames: Record<string, string> = {};
   try {
-    const local = JSON.parse(readFileSync(join(root, "Local State"), "utf8"));
-    for (const [dir, info] of Object.entries(local?.profile?.info_cache ?? {})) {
+    const local = JSON.parse(readFileSync(join(root, "Local State"), "utf8")) as {
+      profile?: { info_cache?: Record<string, unknown> };
+    };
+    for (const [dir, info] of Object.entries(local.profile?.info_cache ?? {})) {
       displayNames[dir] = (info as { name?: string })?.name ?? dir;
     }
   } catch { /* Local State missing/unreadable — fall back to dir names */ }

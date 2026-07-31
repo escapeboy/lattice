@@ -9,7 +9,7 @@ describe("keychain-vault — provider shape", () => {
     expect(p.id).toBe("keychain");
     expect(p.prefix).toBe("kc");
     expect(p.needsSession).toBe(false);
-    expect(p.listLogins).toBeUndefined();      // not enumerable
+    expect(typeof p.listLogins).toBe("undefined");      // not enumerable
     expect(typeof p.findByOrigin).toBe("function");
   });
 
