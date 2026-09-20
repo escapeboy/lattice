@@ -56,13 +56,31 @@ interface LayoutMetricsResult {
 
 // ── Role mapping ──────────────────────────────────────────────────────────────
 
+/**
+ * Chrome's computed AX role string -> Lattice's role.
+ *
+ * The keys must be EXACTLY what `Accessibility.getFullAXTree` emits. Three
+ * entries here were spaced ("search box", "spin button", "radio button") and
+ * Chrome emits `searchbox`, `spinbutton` and `radio`, so those controls fell
+ * through the map and, being non-interactive by Lattice's reckoning, never
+ * reached the Interaction Graph at all. Verified against a fixture: a
+ * `<input type="search">` produced NO node, which is why a search box could
+ * not be addressed on developer.mozilla.org or mediawiki.org.
+ *
+ * The spaced spellings are kept alongside the real ones: they cost nothing and
+ * older Chrome builds did emit some of them.
+ */
 const ROLE_MAP: Record<string, NodeRole> = {
   button: "button",
   link: "link",
   textbox: "input",
+  searchbox: "input",
   "search box": "input",
   "password field": "input",
+  spinbutton: "input",
   "spin button": "input",
+  slider: "input",
+  radio: "radio",
   listbox: "select",
   combobox: "combobox",
   textarea: "textarea",
