@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect, beforeEach } from "vitest";
-import { GovernedActuator, type ReAnchor } from "./governed-actuator.js";
+import { GovernedActuator, type EffectBackstopPort, type ReAnchor } from "./governed-actuator.js";
 import { ActionError } from "./types.js";
 import type { ActionCommand } from "./types.js";
 import { createSecurityKernel } from "@lattice/kernel";
@@ -359,5 +359,96 @@ describe("GovernedActuator — robots.txt navigation gate (obey-robots)", () => 
     const res = await act.execute({ type: "navigate", url: "https://site.example/next" });
     expect(res.ok).toBe(true);
     expect(session.navs).toEqual(["https://site.example/next"]);
+  });
+});
+
+describe("GovernedActuator — network backstop wiring", () => {
+  class RecordingBackstop implements EffectBackstopPort {
+    calls: string[] = [];
+    arm(): Promise<void> {
+      this.calls.push("arm");
+      return Promise.resolve();
+    }
+    disarm(): Promise<void> {
+      this.calls.push("disarm");
+      return Promise.resolve();
+    }
+  }
+
+  function kernelWith(grant: boolean | undefined): SecurityKernel {
+    return createSecurityKernel({
+      allowedOrigins: ["https://app.example.com"],
+      egressAllowlist: [],
+      prohibitedActions: [],
+      ...(grant !== undefined
+        ? { grantHandler: (): Promise<GrantDecision> => Promise.resolve({ granted: grant, grantId: "g1" }) }
+        : {}),
+    });
+  }
+
+  it("arms BEFORE the engine acts and disarms after — an auto-granted action is watched", async () => {
+    const session = new FakeSession();
+    const backstop = new RecordingBackstop();
+    const actuator = new GovernedActuator(session, kernelWith(undefined), anchor, {
+      ...ctx,
+      backstop,
+    });
+    const res = await actuator.execute({ type: "act", target: target() });
+    expect(res.ok).toBe(true);
+    expect(backstop.calls).toEqual(["arm", "disarm"]);
+    expect(res.backstop).toBe("armed");
+  });
+
+  it("disarms even when the engine action fails", async () => {
+    const session = new FakeSession();
+    session.nextActOk = false;
+    session.nextActError = "element is disabled";
+    const backstop = new RecordingBackstop();
+    const actuator = new GovernedActuator(session, kernelWith(undefined), anchor, { ...ctx, backstop });
+    await expect(actuator.execute({ type: "act", target: target() })).rejects.toBeInstanceOf(ActionError);
+    expect(backstop.calls).toEqual(["arm", "disarm"]);
+  });
+
+  it("does NOT arm for a consequential action — it already carries a human grant", async () => {
+    // Asking again for the request it obviously makes would be a second prompt
+    // for the same decision.
+    const session = new FakeSession();
+    const backstop = new RecordingBackstop();
+    const actuator = new GovernedActuator(session, kernelWith(true), anchor, { ...ctx, backstop });
+    const res = await actuator.execute({ type: "submit", target: target() });
+    expect(res.gated).toBe(true);
+    expect(res.backstop).toBe("disabled");
+    expect(backstop.calls).toEqual([]);
+  });
+
+  it("is ON by default: supplying a port is the whole opt-in", async () => {
+    const session = new FakeSession();
+    const backstop = new RecordingBackstop();
+    const actuator = new GovernedActuator(session, kernelWith(undefined), anchor, { ...ctx, backstop });
+    await actuator.execute({ type: "fill", target: target("input-1"), value: "x" });
+    expect(backstop.calls).toEqual(["arm", "disarm"]);
+  });
+
+  it("reports `unavailable` rather than claiming protection it does not have", async () => {
+    // The build-on engine seam has no way to see a request: agent-browser's
+    // `network` primitive is firewalled and the egress proxy sees only
+    // CONNECT host:port over HTTPS. Saying so beats silence.
+    const session = new FakeSession();
+    const actuator = new GovernedActuator(session, kernelWith(undefined), anchor, ctx);
+    const res = await actuator.execute({ type: "act", target: target() });
+    expect(res.backstop).toBe("unavailable");
+  });
+
+  it("records an explicit opt-out as `disabled`, distinct from `unavailable`", async () => {
+    const session = new FakeSession();
+    const backstop = new RecordingBackstop();
+    const actuator = new GovernedActuator(session, kernelWith(undefined), anchor, {
+      ...ctx,
+      backstop,
+      backstopDisabled: true,
+    });
+    const res = await actuator.execute({ type: "act", target: target() });
+    expect(res.backstop).toBe("disabled");
+    expect(backstop.calls).toEqual([]);
   });
 });
