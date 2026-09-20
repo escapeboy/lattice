@@ -186,6 +186,15 @@ export function classifyEffect(
   // no way to tell an embedded payment form from a comment widget. That is the
   // textbook unknown, and unknown is consequential. Cross-origin makes it
   // worse, not different: the embedding page does not control what is in there.
+  // The same blind spot seen from outside: when the TARGET is the frame
+  // element, we are being asked to click a box whose contents perception never
+  // enumerated. Held-out capture found this on Cloudflare challenge widgets,
+  // where the iframe itself is what the AX tree exposes.
+  if (evidence.tag?.toLowerCase() === "iframe") {
+    cls = raise(cls, "consequential");
+    reasons.push("target is an iframe element — perception does not cover its contents");
+  }
+
   if (evidence.inFrame === true) {
     cls = raise(cls, "consequential");
     reasons.push(

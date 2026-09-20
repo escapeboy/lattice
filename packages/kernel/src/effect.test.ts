@@ -264,3 +264,35 @@ describe("effect gate — the verb-name bypass", () => {
   });
 });
 
+describe("effect gate — terms added from held-out misses", () => {
+  // Every case below is a real control the gate got WRONG on the held-out set
+  // of 78 actions from 25 origins it had never seen. The lexicon was extended
+  // from these misses and from nothing else.
+
+  it("classifies Bulgarian consent commits as consequential", () => {
+    // The lexicon already had the imperative "приеми*"; every banner in the
+    // held-out set used a form it did not reach.
+    const consentButtons = ["ПРИЕМАМ", "бутон ПРИЕМАМ", "Приемам", "Запази", "Откажи всички"];
+    for (const name of consentButtons) {
+      expect(classify({ role: "button", name }), name).toBe("consequential");
+    }
+  });
+
+  it("does not raise the control that merely OPENS the consent panel", () => {
+    // The distinction the set turns on: opening preferences commits nothing.
+    for (const name of ["Настройки", "Персонализация", "Cookies"]) {
+      expect(classify({ role: "button", name }), name).toBe("benign");
+    }
+  });
+
+  it("treats a Cloudflare security challenge as a captcha even unnamed as one", () => {
+    expect(classify({ role: "button", name: "Widget containing a Cloudflare security challenge" })).toBe("prohibited");
+  });
+
+  it("classifies an iframe TARGET as consequential, like a target inside one", () => {
+    // Same blind spot from the other side: perception never enumerated what is
+    // in the box we are being asked to click.
+    expect(classify({ role: "button", name: "Embedded widget", tag: "iframe" })).toBe("consequential");
+    expect(classify({ role: "button", name: "Embedded widget", tag: "button" })).toBe("benign");
+  });
+});

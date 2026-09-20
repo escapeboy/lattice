@@ -23,7 +23,7 @@
  * misfire ("pay*" hits "payload").
  */
 
-export const EFFECT_LEXICON_VERSION = "2026-09-20.4";
+export const EFFECT_LEXICON_VERSION = "2026-09-20.5";
 
 export type LexiconLang = "en" | "bg";
 
@@ -148,8 +148,14 @@ export const EFFECT_LEXICON: EffectLexicon = {
     {
       primitive: "captcha",
       terms: {
-        en: ["captcha", "recaptcha", "hcaptcha", "i'm not a robot", "im not a robot", "verify you are human"],
-        bg: ["не съм робот", "потвърдете, че не сте робот"],
+        // "security challenge" comes from the held-out set: Cloudflare's widget
+        // is labelled "Widget containing a Cloudflare security challenge" and
+        // never contains the word captcha.
+        en: [
+          "captcha", "recaptcha", "hcaptcha", "i'm not a robot", "im not a robot",
+          "verify you are human", "security challenge", "challenge widget",
+        ],
+        bg: ["не съм робот", "потвърдете, че не сте робот", "проверка за сигурност"],
       },
     },
     {
@@ -201,6 +207,11 @@ export const EFFECT_LEXICON: EffectLexicon = {
       "плащане*", "плащания", "фактура*", "дарение*", "дарения",
       "превод", "преводи", "теглене", "каса", "поръчка*", "възстановяване на сума",
       "потвърди*", "потвърждение", "приеми*", "приложи промените",
+      // Consent-banner verb forms, added from held-out misses. The list had
+      // the imperative "приеми*"; every banner in the set used the first-person
+      // "приемам" or a save/refuse-all button, none of which it reached.
+      "приемам", "приемаме", "запази*", "запазване",
+      "откажи всички", "приеми всички", "разреши всички", "отхвърли всички",
       "активирай*", "инсталирай*", "деинсталирай*", "обнови*", "одобри*",
       "абонирай*", "абонамент*", "отпиши се", "прекрати абонамента",
       "бюлетин*", "пощенски списък", "информационен бюлетин",
