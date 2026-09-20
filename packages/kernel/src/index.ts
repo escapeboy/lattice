@@ -20,6 +20,16 @@ export type {
 } from "./types.js";
 
 export { taint } from "./types.js";
+export type { EffectEvidence, EffectVerdict } from "./effect.js";
+export { classifyEffect } from "./effect.js";
+export {
+  EFFECT_LEXICON,
+  EFFECT_LEXICON_VERSION,
+  matchTerm,
+  hasMonetaryAmount,
+  normalizeForMatch,
+} from "./effect-lexicon.js";
+export type { EffectLexicon, TermSet } from "./effect-lexicon.js";
 export { SecurityKernelImpl } from "./kernel.js";
 export { CONSTITUTIONAL_FLOOR, OperatorGate, violatesFloor } from "./operator.js";
 export { actionCatalog, type ActionCatalogEntry, type ActionCategory } from "./catalog.js";

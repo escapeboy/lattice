@@ -81,7 +81,15 @@ describe("BuildOnSession — governed composition (unit)", () => {
 
   it("re-anchors to the NEW ref after a re-render (identity stable, ref changed)", async () => {
     const engine = new FakeEngine();
-    const session = new BuildOnSession(engine, kernel(), { origin: ORIGIN, sessionId: "s1" });
+    // The only control here is labelled "Submit", which the effect gate rightly
+    // classifies consequential. This test is about re-anchoring, so approve it.
+    const granting = createSecurityKernel({
+      allowedOrigins: [ORIGIN],
+      egressAllowlist: [],
+      prohibitedActions: [],
+      grantHandler: (): Promise<GrantDecision> => Promise.resolve({ granted: true, grantId: "g1" }),
+    });
+    const session = new BuildOnSession(engine, granting, { origin: ORIGIN, sessionId: "s1" });
     const ig1 = await session.perceive();
     const submitId = [...ig1.graph.nodes.values()].find((n) => n.role === "button")!.id;
 

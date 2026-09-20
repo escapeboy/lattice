@@ -19,8 +19,13 @@ export type { ReAnchor, GovernedActionResult, ActuatorContext, RateLimiterPort, 
 export { runLadder, locateInIG, RecoveryExecutor } from "./recovery.js";
 export { normalizeLabel, labelMatches } from "./label-match.js";
 export { pointerPointFor } from "./pointer-target.js";
+export { probeEffect } from "./effect-probe.js";
 export { resolveTarget } from "./resolver.js";
 export type { ResolvedTarget } from "./resolver.js";
+export { EffectBackstop } from "./effect-backstop.js";
+export type { PausedRequest, BackstopOptions, EscalationHandler } from "./effect-backstop.js";
+export { collectEngineEvidence } from "./engine-evidence.js";
+export type { PerceivedNode } from "./engine-evidence.js";
 export type { PointerPoint } from "./pointer-target.js";
 export type {
   RecoveryRung,

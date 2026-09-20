@@ -55,8 +55,20 @@ const LOGIN_NODES: LocatableNode[] = [
   { id: "email" as NodeId, role: "input", label: "Email" },
   { id: "password" as NodeId, role: "input", label: "Password" },
   { id: "signin" as NodeId, role: "button", label: "Sign in" },
+  { id: "help" as NodeId, role: "link", label: "Help" },
 ];
-const anchor: ReAnchor = { refFor: (id) => (LOGIN_NODES.some((n) => n.id === id) ? "e1" : undefined) };
+const anchor: ReAnchor = {
+  refFor: (id) => (LOGIN_NODES.some((n) => n.id === id) ? "e1" : undefined),
+  // The effect gate classifies on what the control IS, so the fixture has to
+  // say. A node it cannot describe is an unknown target, and unknown targets
+  // are consequential by design.
+  nodeFor: (id) => {
+    const n = LOGIN_NODES.find((x) => x.id === id);
+    return n
+      ? { role: n.role, label: n.label, ...(n.role === "link" ? { href: `${ORIGIN}/help` } : {}) }
+      : undefined;
+  },
+};
 
 function gateFor(
   session: FakeSession,
@@ -79,6 +91,7 @@ function recipe(steps: RecipeStep[], trust: Recipe["trust"] = "trusted"): Recipe
 
 const FILL_EMAIL: RecipeStep = { action: "fill", locator: { role: "input", label: "Email" }, value: "a@b.com" };
 const CLICK_SIGNIN: RecipeStep = { action: "act", locator: { role: "button", label: "Sign in" } };
+const CLICK_HELP: RecipeStep = { action: "act", locator: { role: "link", label: "Help" } };
 const SUBMIT_SIGNIN: RecipeStep = { action: "submit", locator: { role: "button", label: "Sign in" } };
 
 describe("resolveLocator", () => {
@@ -118,7 +131,7 @@ describe("toCommand — only ever yields a semantic, NodeId-addressed command", 
 describe("applyRecipe — runs through the real governed path", () => {
   it("benign steps execute via the kernel-gated engine", async () => {
     const session = new FakeSession();
-    const res = await applyRecipe(recipe([FILL_EMAIL, CLICK_SIGNIN]), {
+    const res = await applyRecipe(recipe([FILL_EMAIL, CLICK_HELP]), {
       perceive: () => LOGIN_NODES,
       gate: gateFor(session),
     });
@@ -128,6 +141,19 @@ describe("applyRecipe — runs through the real governed path", () => {
       { type: "fill", target: { kind: "ref", ref: "e1" }, value: "a@b.com" },
       { type: "click", target: { kind: "ref", ref: "e1" } },
     ]);
+  });
+
+  // ── INVARIANT: the verb cannot buy a cheaper class than the target deserves ─
+  it("`act` on the Sign in control is DENIED exactly like `submit` on it", async () => {
+    // Same element, two verbs. Before the effect gate, `act` walked through and
+    // `submit` was denied — so a recipe could log in by picking the cheap verb.
+    const session = new FakeSession();
+    const res = await applyRecipe(recipe([CLICK_SIGNIN]), {
+      perceive: () => LOGIN_NODES,
+      gate: gateFor(session),
+    });
+    expect(res.outcomes[0]!.status).toBe("denied");
+    expect(session.acts).toHaveLength(0);
   });
 
   // ── INVARIANT: a recipe cannot bypass gating ───────────────────────────────
@@ -183,24 +209,24 @@ describe("applyRecipe — runs through the real governed path", () => {
   // ── INVARIANT: drift degrades gracefully, never a stale-ref fire ────────────
   it("a locator that no longer matches the live page FALLS BACK — no stale ref fired", async () => {
     const session = new FakeSession();
-    // The site changed: "Sign in" became "Log in". The recipe's CLICK_SIGNIN no longer resolves.
+    // The site changed: the "Help" link is gone. The recipe's CLICK_HELP no longer resolves.
     const changed: LocatableNode[] = [
       { id: "email" as NodeId, role: "input", label: "Email" },
       { id: "login" as NodeId, role: "button", label: "Log in" },
     ];
     let fellBackStep: RecipeStep | undefined;
-    const res = await applyRecipe(recipe([FILL_EMAIL, CLICK_SIGNIN]), {
+    const res = await applyRecipe(recipe([FILL_EMAIL, CLICK_HELP]), {
       perceive: () => changed,
       gate: gateFor(session),
       fallback: (step) => {
         fellBackStep = step;
-        return Promise.resolve({ ok: true, reason: "semantic path located 'Log in'" });
+        return Promise.resolve({ ok: true, reason: "semantic path located the replacement" });
       },
     });
     expect(res.outcomes[0]!.status).toBe("executed"); // Email still matches
-    expect(res.outcomes[1]!.status).toBe("fellBack"); // Sign in drifted → fallback
+    expect(res.outcomes[1]!.status).toBe("fellBack"); // Help drifted → fallback
     expect(res.completed).toBe(true);
-    expect(fellBackStep).toBe(CLICK_SIGNIN);
+    expect(fellBackStep).toBe(CLICK_HELP);
     // The engine only saw the fill; the drifted click never fired a stale ref.
     expect(session.acts).toEqual([{ type: "fill", target: { kind: "ref", ref: "e1" }, value: "a@b.com" }]);
   });
