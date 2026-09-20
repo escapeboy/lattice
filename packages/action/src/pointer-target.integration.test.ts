@@ -16,7 +16,8 @@ import { createEngineAdapter, detectChromiumExecutable } from "@lattice/engine";
 import type { ContextHandle, EngineAdapter } from "@lattice/engine";
 import { createPerceptionEngine } from "@lattice/perception";
 import type { IGNode, InteractionGraph } from "@lattice/perception";
-import { createActionEngine, ActionError, pointerPointFor } from "./index.js";
+import { createActionEngine, ActionError, pointerPointFor, probeEffect } from "./index.js";
+import { createSecurityKernel } from "@lattice/kernel";
 import type { ActionEngine } from "./types.js";
 
 const executablePath = detectChromiumExecutable();
@@ -269,5 +270,75 @@ describeIfBrowser("actuator — off-screen and obstructed targets (regression)",
     expect(await evaluate<number>("scrollY")).toBe(0);
     await actions.execute({ type: "scroll_to", target: { nodeId: target.id } });
     expect(await evaluate<number>("scrollY")).toBeGreaterThan(3000);
+  });
+});
+
+describeIfBrowser("iframe targets are consequential until perception covers frames", () => {
+  let base: string;
+  let httpServer: Server;
+  let adapter: EngineAdapter;
+  let ctx: ContextHandle;
+
+  beforeAll(async () => {
+    const started = await startTestServer();
+    base = started.base;
+    httpServer = started.server;
+    adapter = createEngineAdapter();
+    await adapter.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
+    ctx = await adapter.createContext();
+  });
+
+  afterAll(async () => {
+    await ctx?.close();
+    await adapter?.shutdown();
+    httpServer?.close();
+  });
+
+  async function backendNodeIdIn(frameSelector: string | null, selector: string): Promise<number> {
+    const cdp = ctx.cdp();
+    if (frameSelector === null) {
+      const { root } = await cdp.send<{ root: { nodeId: number } }>("DOM.getDocument", { depth: -1 });
+      const { nodeId } = await cdp.send<{ nodeId: number }>("DOM.querySelector", { nodeId: root.nodeId, selector });
+      const { node } = await cdp.send<{ node: { backendNodeId: number } }>("DOM.describeNode", { nodeId });
+      return node.backendNodeId;
+    }
+    const { frameTree } = await cdp.send<{ frameTree: { childFrames?: Array<{ frame: { id: string } }> } }>(
+      "Page.getFrameTree",
+      {},
+    );
+    const frameId = frameTree.childFrames?.[0]?.frame.id;
+    const { nodes } = await cdp.send<{ nodes: Array<{ name?: { value?: string }; backendDOMNodeId?: number }> }>(
+      "Accessibility.getFullAXTree",
+      { depth: -1, frameId },
+    );
+    const hit = nodes.find((n) => n.name?.value === selector);
+    expect(hit?.backendDOMNodeId, `"${selector}" missing from the frame AX tree`).toBeDefined();
+    return hit!.backendDOMNodeId!;
+  }
+
+  it("the probe reports inFrame for a control inside an iframe, and not for one outside", async () => {
+    await ctx.navigate(`${base}/iframe`);
+    await ctx.cdp().send("Emulation.setDeviceMetricsOverride", { ...VIEWPORT, deviceScaleFactor: 1, mobile: false });
+
+    const framed = await probeEffect(ctx.cdp(), await backendNodeIdIn("iframe", "Framed target"));
+    expect(framed.inFrame).toBe(true);
+    expect(framed.frameOrigin).toBeDefined();
+
+    const main = await probeEffect(ctx.cdp(), await backendNodeIdIn(null, "#spacer"));
+    expect(main.inFrame).toBeUndefined();
+  });
+
+  it("the kernel gates a framed click that would otherwise be benign", async () => {
+    await ctx.navigate(`${base}/iframe`);
+    const kernel = createSecurityKernel({ allowedOrigins: [], egressAllowlist: [], prohibitedActions: [] });
+    const framed = await probeEffect(ctx.cdp(), await backendNodeIdIn("iframe", "Framed target"));
+
+    // Same control, same label — only the frame membership differs.
+    const { inFrame, frameOrigin, ...unframed } = framed;
+    void inFrame;
+    void frameOrigin;
+    const req = { actionType: "act", origin: base, sessionId: "t", payload: {} };
+    expect(kernel.classify({ ...req, effect: unframed })).toBe("benign");
+    expect(kernel.classify({ ...req, effect: framed })).toBe("consequential");
   });
 });

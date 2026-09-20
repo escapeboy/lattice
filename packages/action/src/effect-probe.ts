@@ -77,6 +77,20 @@ const PROBE = `function (textBudget) {
     }
   }
 
+  // ── frame membership. A framed target is one perception cannot describe.
+  try {
+    const win = el.ownerDocument && el.ownerDocument.defaultView;
+    if (win && win.top !== win) {
+      out.inFrame = true;
+      out.frameOrigin = (el.ownerDocument.location && el.ownerDocument.location.origin) || "unknown";
+    }
+  } catch (e) {
+    // A cross-origin frame can throw on window.top access — which is itself
+    // the answer: if we cannot even compare, we are not in the main frame.
+    out.inFrame = true;
+    out.frameOrigin = "cross-origin";
+  }
+
   // ── dialog / confirmation context
   const dialog = el.closest ? el.closest('dialog,[role="dialog"],[role="alertdialog"],[aria-modal="true"]') : null;
   if (dialog) {

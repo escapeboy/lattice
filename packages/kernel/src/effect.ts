@@ -70,6 +70,16 @@ export interface EffectEvidence {
   readonly dialogText?: string;
   /** Text immediately around the control. PAGE-CONTROLLED. */
   readonly nearbyText?: string;
+  /**
+   * The target does not live in the main frame.
+   *
+   * Perception cannot see inside frames yet (`Accessibility.getFullAXTree` is
+   * called without a `frameId`, so it stops at the Iframe node), which means
+   * nothing upstream can vouch for what this control is or who serves it.
+   */
+  readonly inFrame?: boolean;
+  /** Origin of the owning frame, when it differs from the main document. */
+  readonly frameOrigin?: string;
   /** The probe could not read the element at all. */
   readonly probeFailed?: boolean;
 }
@@ -169,6 +179,22 @@ export function classifyEffect(
   }
 
   // ── STRUCTURAL SIGNALS ────────────────────────────────────────────────────
+
+  // A target inside an iframe is consequential, full stop, until perception
+  // covers frames. Today the IG enumerates the main frame only, so for a framed
+  // control we have no perceived node, no label the operator can be shown, and
+  // no way to tell an embedded payment form from a comment widget. That is the
+  // textbook unknown, and unknown is consequential. Cross-origin makes it
+  // worse, not different: the embedding page does not control what is in there.
+  if (evidence.inFrame === true) {
+    cls = raise(cls, "consequential");
+    reasons.push(
+      evidence.frameOrigin !== undefined
+        ? `target is inside an iframe (${evidence.frameOrigin}) — perception does not cover frames`
+        : "target is inside an iframe — perception does not cover frames",
+    );
+  }
+
   // Not page-controlled in the same sense as a label: these are what the
   // element IS. A hostile page can still set them, but only in the direction of
   // making its own control look MORE dangerous, which is safe.

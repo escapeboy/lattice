@@ -127,6 +127,29 @@ describe("effect gate — structural signals", () => {
     expect(classify({ role: "input", name: "Body", contentEditable: true }, "fill")).toBe("consequential");
   });
 
+  it("ANY target inside an iframe is consequential, whatever else it looks like", () => {
+    // Perception does not enumerate frames, so for a framed control there is no
+    // perceived node, no label to show an operator, and no way to tell an
+    // embedded payment form from a comment widget.
+    const harmless: EffectEvidence = { role: "link", name: "Read more", href: `${ORIGIN}/docs` };
+    expect(classify(harmless)).toBe("benign");
+    expect(classify({ ...harmless, inFrame: true })).toBe("consequential");
+    expect(classify({ ...harmless, inFrame: true, frameOrigin: "https://widget.example.net" })).toBe(
+      "consequential",
+    );
+    expect(classify({ ...harmless, inFrame: true, frameOrigin: "cross-origin" })).toBe("consequential");
+  });
+
+  it("the iframe rule names itself in the reasons, so the operator sees why", () => {
+    const v = classifyEffect("benign", { role: "button", name: "OK", inFrame: true, frameOrigin: "https://x.test" }, ORIGIN);
+    expect(v.reasons.join(" ")).toContain("iframe");
+    expect(v.reasons.join(" ")).toContain("https://x.test");
+  });
+
+  it("a framed READ is still a read — reading a frame commits nothing", () => {
+    expect(classify({ role: "heading", name: "Terms", inFrame: true }, "extract")).toBe("read");
+  });
+
   it("a non-http scheme leaves the browser and is consequential", () => {
     expect(classify({ role: "link", name: "Contact", href: "mailto:ops@example.com" })).toBe("consequential");
   });
@@ -240,3 +263,4 @@ describe("effect gate — the verb-name bypass", () => {
     expect(classify(evidence, "act")).toBe("consequential");
   });
 });
+
