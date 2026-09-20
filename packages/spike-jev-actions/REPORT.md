@@ -314,3 +314,111 @@ clicking *Delete account*.
   (`baseline-fixtures`, `baseline-tasks`) the moment a funded key is available.
 - **Phase 1 on live sites is not a clean read** of the approach while the
   actuation bug stands.
+
+---
+
+# Iteration 3 — action history, loop detection, margin rule
+
+Three changes, then the 10-task set again.
+
+1. **Action history in state.** The last 8 steps, each as operation + target
+   (role, index, label) + the effect actually observed: whether the URL changed,
+   whether scroll moved, whether the DOM changed size. Observation is real, not
+   assumed — `page-mark.ts` reads all three in one `Runtime.evaluate` before and
+   after every action.
+2. **Loop detection in code, not in the prompt.** The same (operation, target)
+   twice with no observed effect and that target is excluded from the next
+   request. The threshold is twice, not once: one no-op click is normal on a page
+   that is still settling.
+3. **Margin rule replacing the absolute thresholds.** Act when
+   `p1 − p2 ≥ 0.15` **or** `p1 ≥ 0.5`; otherwise re-perceive once, then BLOCKED.
+
+## Result
+
+| | Phase 1 (iteration 2) | **Iteration 3** |
+|---|---|---|
+| success | 1/10 (10.0%) | **3/10 (30.0%)** |
+| median steps | 3 | 3 |
+| median wall | 1 923 ms | 1 660 ms |
+| Jev share of wall | — | **55.5%** |
+| median input tokens | 3 493 | 7 167 |
+| cost / task | $0.00098 | $0.00030 |
+
+Per task: `hn-paginate`, `hn-detail` and `wikipedia-form` pass. `google-flights`
+fails all 5 runs, `wikipedia-search` and `wikipedia-detail` fail once each.
+
+## How often each branch fires
+
+30 steps, two decision heads:
+
+| branch | operation head | target head |
+|---|---:|---:|
+| margin (`p1 − p2 ≥ 0.15`) | 18 | 14 |
+| absolute (`p1 ≥ 0.5`) | 1 | 0 |
+| undecided → re-perceive, then BLOCKED | 10 | 2 |
+| head not consulted | 1 | 14 |
+
+**The margin rule is doing essentially all the work and the absolute floor almost
+none** — it fired once in 30 steps on the operation head and never on the target
+head. That is the intended shape: when the model is confident it is usually
+confident by a wide margin, and when it is not, `p1 ≥ 0.5` was letting through
+exactly the coin-flips the margin rule now stops.
+
+## Did loop detection work?
+
+Yes, and the transcript shows it plainly. On `wikipedia-detail`:
+
+```
+step1 CLICK "Usability"  -> url+scroll     (worked)
+step2 CLICK "Usability"  -> NOTHING
+step3 CLICK "Usability"  -> NOTHING
+step4 CLICK "Wide"       -> NOTHING        excludedByLoop=["Usability"]
+step5 CLICK "Wide"       -> NOTHING
+step6 BLOCKED                              excludedByLoop=["Usability","Wide","Wide"]
+step7 BLOCKED
+```
+
+4 of 14 executed steps produced no observable effect, and every one was caught.
+The agent stopped repeating itself. It then had nothing left to try and blocked —
+which is the honest outcome, not a rescued one.
+
+## Failure catalogue
+
+| task | n | terminal | what actually happened |
+|---|---:|---|---|
+| `google-flights` | 5 | `blocked:operation_undecided` | Step 1 clicks "Change ticket type. Round trip" and the DOM changes — a dropdown opens. From step 2 the operation head splits three ways (BLOCKED ≈ 0.33, CLICK ≈ 0.28, SELECT ≈ 0.25) and never recovers a margin. The model does not know that an open dropdown wants SELECT. |
+| `wikipedia-detail` | 1 | `blocked:target_undecided` | Loop detection worked exactly as designed and then ran the agent out of road: after excluding "Usability" and "Wide" as no-ops, no target had a margin. |
+| `wikipedia-search` | 1 | `blocked:no_elements` | Step 1 clicked "Search", which navigated (url+dom changed). The next perception returned an empty element table. Perception problem, not decision problem. |
+
+`google-flights` is 5 of the 7 failures, and all five fail the same way at the same
+step. It is one bug, counted five times.
+
+## Baseline: still not run
+
+The `Anthropic API` credential in the `AI Agent` vault authenticates and returns
+`400 invalid_request_error — "Your credit balance is too low to access the
+Anthropic API."` Same billing state as the previous iteration. Per the brief this
+part stops there; the `Anthropic API kvesta` item belongs to another project and
+was not used.
+
+So the Phase 0 / Phase 1 / **baseline** comparison still has an empty column, and
+there is no measurement of what Claude would score on this same task set.
+
+## Recommendation: park the spike
+
+Success is **3/10**, below the 5/10 bar. Parking it is the call.
+
+Two honest caveats on that number, neither of which changes the recommendation:
+
+- **The bar was nearly met by one task class.** Exclude `google-flights` and the
+  remaining five tasks run 3/5. The spike is not uniformly failing — it fails one
+  interaction pattern, repeatedly.
+- **Two of the three iteration-3 changes work.** Loop detection caught every no-op
+  it was built to catch, and the margin rule replaced a threshold that was
+  letting coin-flips through. Neither is the reason the score is 3/10.
+
+What would have to be true to unpark it: a way to choose SELECT on an open
+dropdown, and perception that survives a navigation. Both are outside the decision
+model the spike exists to test — which is itself the finding. The remaining
+failures are not decision-quality failures, and this spike only measures decision
+quality.

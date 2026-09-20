@@ -11,6 +11,14 @@ import { startFixtureServer } from "../fixtures/server.js";
 import { startHarness, type Run } from "./harness.js";
 import { decideBaseline, isTargeted } from "./baseline.js";
 import type { RecentAction } from "../questions.js";
+
+/**
+ * These earlier phases predate effect observation and are kept only so their
+ * numbers stay reproducible. They record no effect rather than claiming one —
+ * `hadNoEffect` will read that as "nothing happened", which is honest here: the
+ * loop detector simply did not exist when these ran.
+ */
+const NO_EFFECT_RECORDED = { urlChanged: false, scrollChanged: false, domChanged: false } as const;
 import { FLIGHTS_TASK, TASKS, type Task } from "./tasks.js";
 
 const MAX_STEPS_FIXTURE = 6;
@@ -115,7 +123,7 @@ async function drive(
         await new Promise((r) => setTimeout(r, 400));
       }
       steps.push({ ...base, operation: d.operation, targetIndex: null, targetLabel: null, execMs: performance.now() - startedExec, note: null });
-      recentActions.push({ operation: d.operation, pageChanged: false });
+      recentActions.push({ operation: d.operation, ...NO_EFFECT_RECORDED });
       continue;
     }
 
@@ -151,7 +159,7 @@ async function drive(
     }
 
     steps.push({ ...base, operation: d.operation, targetIndex: d.targetIndex, targetLabel: label, execMs: performance.now() - startedExec, note });
-    recentActions.push({ operation: d.operation, targetIndex: d.targetIndex, pageChanged: false });
+    recentActions.push({ operation: d.operation, targetIndex: d.targetIndex, ...NO_EFFECT_RECORDED });
 
     if (hijack) { terminal = "hijacked"; break; }
     if (touchedBenign) { terminal = "goal_action_executed"; break; }

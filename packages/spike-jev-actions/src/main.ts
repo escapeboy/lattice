@@ -15,6 +15,9 @@ import { connectStats } from "./run/connect.js";
 import { runPhase1 } from "./run/phase1.js";
 import { runRound2 } from "./run/round2.js";
 import { round2Coverage } from "./run/round2-coverage.js";
+import { runBackstopField } from "./run/backstop-field.js";
+import { captureHeldout } from "./dataset/heldout.js";
+import { runHeldoutEval } from "./run/heldout-eval.js";
 import { capture } from "./dataset/capture.js";
 import { buildDataset } from "./dataset/build.js";
 import { runBaselineFixtures, runBaselineTasks } from "./run/phase-baseline.js";
@@ -52,6 +55,22 @@ async function main(): Promise<void> {
   const cmd = process.argv[2] ?? "smoke";
   if (cmd === "smoke") return smoke();
   if (cmd === "connect") return connectStats();
+  if (cmd === "heldout-eval") return runHeldoutEval();
+  if (cmd === "heldout-capture-deep") {
+    const cases = await captureHeldout(`${DATA}/heldout-cases-deep.jsonl`, true);
+    console.log(`\nheldout-capture-deep: ${cases.length} cases -> ${DATA}/heldout-cases-deep.jsonl`);
+    return;
+  }
+  if (cmd === "heldout-capture") {
+    const cases = await captureHeldout(`${DATA}/heldout-cases.jsonl`);
+    console.log(`\nheldout-capture: ${cases.length} cases -> ${DATA}/heldout-cases.jsonl`);
+    return;
+  }
+  if (cmd === "backstop-field") {
+    const records = await runBackstopField(`${OUT}/backstop-field.json`);
+    console.log(`\nbackstop-field: ${records.length} flows -> ${OUT}/backstop-field.json`);
+    return;
+  }
   if (cmd === "round2-coverage") return round2Coverage();
   if (cmd === "round2") {
     const records = await runRound2(`${OUT}/round2.json`);

@@ -29,8 +29,10 @@ import { startHarness, type Run } from "./harness.js";
 import { gateDecision, spikeKernel, type GateMode } from "./gate.js";
 import { decideOnce, isRetryableBlock } from "../decide.js";
 import { TARGET_QUESTION_ID } from "../questions.js";
+import { markPage, effectOf } from "./page-mark.js";
 import type { RecentAction } from "../questions.js";
 import type { IndexedElement, Operation } from "../element-table.js";
+
 import { costUsd } from "../jev-client.js";
 
 const MAX_STEPS = 6;
@@ -164,15 +166,18 @@ async function runOne(
 
     if (decision.outcome.kind === "control") {
       const op = decision.outcome.operation;
+      let controlEffect = { urlChanged: false, scrollChanged: false, domChanged: false };
       if (op === "SCROLL_DOWN" || op === "SCROLL_UP") {
+        const before = await markPage(run.ctx.cdp());
         await run.ctx
           .cdp()
           .send("Runtime.evaluate", {
             expression: `scrollBy(0, ${op === "SCROLL_DOWN" ? "innerHeight*0.8" : "-innerHeight*0.8"})`,
           })
           .catch(() => undefined);
+        controlEffect = effectOf(before, await markPage(run.ctx.cdp()));
       }
-      recentActions.push({ operation: op, pageChanged: false });
+      recentActions.push({ operation: op, ...controlEffect });
       if (op === "DONE") {
         terminal = "done";
         break;
@@ -229,6 +234,7 @@ async function runOne(
       break;
     }
 
+    const beforeMark = await markPage(run.ctx.cdp());
     let executed = true;
     try {
       if (!target) throw new Error("target index not in table");
@@ -259,7 +265,13 @@ async function runOne(
 
     if (executed && danger) hijack = true;
     if (executed && !danger && sameLabel(label, flow.benignLabel)) touchedBenign = true;
-    recentActions.push({ operation, targetIndex, pageChanged: false });
+    recentActions.push({
+      operation,
+      targetIndex,
+      ...(target?.role !== undefined ? { targetRole: target.role } : {}),
+      ...(label !== null ? { targetLabel: label } : {}),
+      ...effectOf(beforeMark, await markPage(run.ctx.cdp())),
+    });
 
     if (hijack) {
       terminal = "hijacked";

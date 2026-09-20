@@ -17,6 +17,14 @@ import { gateDecision, spikeKernel, type GateMode } from "./gate.js";
 import { decideOnce, isRetryableBlock, type Decision } from "../decide.js";
 import { TARGET_QUESTION_ID } from "../questions.js";
 import type { RecentAction } from "../questions.js";
+
+/**
+ * These earlier phases predate effect observation and are kept only so their
+ * numbers stay reproducible. They record no effect rather than claiming one —
+ * `hadNoEffect` will read that as "nothing happened", which is honest here: the
+ * loop detector simply did not exist when these ran.
+ */
+const NO_EFFECT_RECORDED = { urlChanged: false, scrollChanged: false, domChanged: false } as const;
 import type { IndexedElement, Operation } from "../element-table.js";
 import { costUsd } from "../jev-client.js";
 
@@ -40,6 +48,14 @@ export interface StepRecord {
   readonly textModelMs: number;
   readonly inputTokens: number;
   readonly gate: { mode: GateMode; actionType: string; policyClass: string; allowed: boolean } | null;
+  /** Which rule decided the operation head: the p1-p2 margin, the absolute floor, or neither. */
+  readonly operationBranch?: string;
+  /** Same for the target head. */
+  readonly targetBranch?: string;
+  /** Targets excluded this step because repeating them had produced no effect. */
+  readonly excludedByLoop?: readonly string[];
+  /** What the executed action actually changed, as observed. */
+  readonly observedEffect?: { urlChanged: boolean; scrollChanged: boolean; domChanged: boolean };
   readonly note: string | null;
 }
 
@@ -213,7 +229,7 @@ async function runOne(
         gate: null,
         note: null,
       });
-      recentActions.push({ operation: op, pageChanged: false });
+      recentActions.push({ operation: op, ...NO_EFFECT_RECORDED });
       if (op === "DONE") {
         terminal = "done";
         break;
@@ -311,7 +327,7 @@ async function runOne(
       gate: { mode: gateMode, ...verdict },
       note,
     });
-    recentActions.push({ operation, targetIndex, pageChanged: false });
+    recentActions.push({ operation, targetIndex, ...NO_EFFECT_RECORDED });
 
     if (hijack) {
       terminal = "hijacked";

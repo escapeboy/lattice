@@ -46,6 +46,7 @@ const OPERATION_RULES = [
   "Pick the single operation that best advances the stated goal from the current page.",
   "`state.elements` lists every control available right now, each with an index.",
   "Judge only the current page. `state.recent_actions` lists what was already done.",
+  "A recent action whose effect is `nothing_happened` did not work; do not repeat it.",
 ];
 
 const TARGET_RULES = [
@@ -63,10 +64,38 @@ const TARGET_QUESTION_ID: Record<TargetedOperation, string> = {
   SELECT: "select_target",
 };
 
+/**
+ * One past step, with what actually happened afterwards.
+ *
+ * The first iteration recorded only `pageChanged: false`, hard-coded — so the
+ * model was told nothing useful and had no way to notice it was repeating
+ * itself. On wikipedia-detail it clicked the same anchor ten times at 0.93
+ * confidence. Recording the OBSERVED EFFECT is what makes that legible, to the
+ * model and to the loop detector in `decide.ts`.
+ */
 export interface RecentAction {
   readonly operation: Operation;
   readonly targetIndex?: number;
-  readonly pageChanged: boolean;
+  /** Role of the control acted on, so a repeat is recognisable after re-indexing. */
+  readonly targetRole?: string;
+  /** PAGE-DERIVED. Goes in state, never in a question. */
+  readonly targetLabel?: string;
+  /** Did the URL change? */
+  readonly urlChanged: boolean;
+  /** Did the scroll position change? */
+  readonly scrollChanged: boolean;
+  /** Did the interaction graph change (nodes added/removed/relabelled)? */
+  readonly domChanged: boolean;
+}
+
+/** True when a step produced no observable effect at all. */
+export function hadNoEffect(a: RecentAction): boolean {
+  return !a.urlChanged && !a.scrollChanged && !a.domChanged;
+}
+
+/** Identity of a step for loop detection: the operation and what it touched. */
+export function actionKey(a: Pick<RecentAction, "operation" | "targetRole" | "targetLabel">): string {
+  return `${a.operation}|${a.targetRole ?? ""}|${(a.targetLabel ?? "").trim().toLowerCase()}`;
 }
 
 export interface JevRequest {
@@ -150,10 +179,19 @@ export function buildRequest(args: {
       ...(pageText !== undefined ? { text: pageText.slice(0, MAX_PAGE_TEXT_CHARS) } : {}),
     },
     elements: elementRows,
-    recent_actions: recentActions.slice(-10).map((a) => ({
+    // Last 8 steps with their observed effect. Page-derived labels belong in
+    // state, never in a question — see taint.ts.
+    recent_actions: recentActions.slice(-8).map((a) => ({
       operation: a.operation,
       ...(a.targetIndex !== undefined ? { target_index: a.targetIndex } : {}),
-      page_changed: a.pageChanged,
+      ...(a.targetRole !== undefined ? { target_role: a.targetRole } : {}),
+      ...(a.targetLabel !== undefined ? { target_label: trimLabel(a.targetLabel) } : {}),
+      effect: {
+        url_changed: a.urlChanged,
+        scroll_changed: a.scrollChanged,
+        dom_changed: a.domChanged,
+        nothing_happened: !a.urlChanged && !a.scrollChanged && !a.domChanged,
+      },
     })),
   });
 

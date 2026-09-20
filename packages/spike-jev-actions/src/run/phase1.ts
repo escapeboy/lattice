@@ -13,6 +13,7 @@ import { FLIGHTS_TASK, TASKS, type Task } from "./tasks.js";
 import { startHarness, type Run } from "./harness.js";
 import { decideOnce, isRetryableBlock } from "../decide.js";
 import type { RecentAction } from "../questions.js";
+import { markPage, effectOf, NO_EFFECT } from "./page-mark.js";
 import { costUsd } from "../jev-client.js";
 import type { StepRecord } from "./phase2a.js";
 
@@ -62,6 +63,9 @@ async function runTask(run: Run, task: Task, attempt: number, navigateMs: number
       inputTokens: decision.inputTokens,
       pInjected: null,
       gate: null,
+      ...(decision.operationBranch !== undefined ? { operationBranch: decision.operationBranch } : {}),
+      ...(decision.targetBranch !== undefined ? { targetBranch: decision.targetBranch } : {}),
+      ...(decision.excludedByLoop.length > 0 ? { excludedByLoop: decision.excludedByLoop } : {}),
     };
 
     if (decision.outcome.kind === "blocked") {
@@ -80,6 +84,7 @@ async function runTask(run: Run, task: Task, attempt: number, navigateMs: number
     if (decision.outcome.kind === "control") {
       const op = decision.outcome.operation;
       const startedExec = performance.now();
+      const beforeControl = await markPage(run.ctx.cdp());
       if (op === "SCROLL_DOWN" || op === "SCROLL_UP") {
         await run.ctx.cdp().send("Runtime.evaluate", {
           expression: `scrollBy(0, ${op === "SCROLL_DOWN" ? "innerHeight*0.8" : "-innerHeight*0.8"})`,
@@ -87,8 +92,10 @@ async function runTask(run: Run, task: Task, attempt: number, navigateMs: number
       } else if (op === "WAIT") {
         await new Promise((r) => setTimeout(r, 400));
       }
+      const controlEffect =
+        op === "DONE" ? NO_EFFECT : effectOf(beforeControl, await markPage(run.ctx.cdp()));
       steps.push({ ...base, operation: op, targetIndex: null, targetLabel: null, targetConfidence: null, targetProbabilities: null, execMs: performance.now() - startedExec, textModelMs: 0, note: null });
-      recentActions.push({ operation: op, pageChanged: false });
+      recentActions.push({ operation: op, ...controlEffect });
       if (op === "DONE") { terminal = "done"; break; }
       continue;
     }
@@ -100,6 +107,7 @@ async function runTask(run: Run, task: Task, attempt: number, navigateMs: number
     ];
 
     let note: string | null = null;
+    const beforeMark = await markPage(run.ctx.cdp());
     const startedExec = performance.now();
     try {
       if (!target) throw new Error("target index not in table");
@@ -115,6 +123,7 @@ async function runTask(run: Run, task: Task, attempt: number, navigateMs: number
       note = `exec_error: ${(err as Error).message}`.slice(0, 200);
     }
 
+    const observedEffect = effectOf(beforeMark, await markPage(run.ctx.cdp()));
     steps.push({
       ...base,
       operation,
@@ -124,9 +133,16 @@ async function runTask(run: Run, task: Task, attempt: number, navigateMs: number
       targetProbabilities: answer ? { ...answer.probabilities } : null,
       execMs: performance.now() - startedExec,
       textModelMs: 0,
+      observedEffect,
       note,
     });
-    recentActions.push({ operation, targetIndex, pageChanged: false });
+    recentActions.push({
+      operation,
+      targetIndex,
+      ...(target?.role !== undefined ? { targetRole: target.role } : {}),
+      ...(target?.label !== undefined && target.label !== null ? { targetLabel: target.label } : {}),
+      ...observedEffect,
+    });
   }
 
   // Independent verification of the FINAL page — not the model's claim.
