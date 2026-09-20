@@ -32,12 +32,6 @@ interface GetFullAXTreeResult {
   nodes: AXNode[];
 }
 
-interface GetBoxModelResult {
-  model: {
-    border: number[];
-  };
-}
-
 interface DomSnapshotResult {
   documents: Array<{
     nodes: {
@@ -45,8 +39,19 @@ interface DomSnapshotResult {
       attributes: number[][];
       isClickable?: { index: number[] };
     };
+    layout?: {
+      nodeIndex: number[];
+      bounds: number[][];
+    };
+    scrollOffsetX?: number;
+    scrollOffsetY?: number;
   }>;
   strings: string[];
+}
+
+interface LayoutMetricsResult {
+  cssLayoutViewport?: { clientWidth: number; clientHeight: number };
+  cssVisualViewport?: { clientWidth: number; clientHeight: number };
 }
 
 // ── Role mapping ──────────────────────────────────────────────────────────────
@@ -133,25 +138,6 @@ function getNumberProp(props: Array<{ name: string; value: AXValue }> | undefine
   return undefined;
 }
 
-// ── Geometry fetching (optional — L2 only) ──────────────────────────────────
-
-async function fetchGeometry(cdp: CDPHandle, backendNodeId: number): Promise<NodeGeometry | undefined> {
-  try {
-    const result = await cdp.send<GetBoxModelResult>("DOM.getBoxModel", {
-      backendNodeId,
-    });
-    const b = result.model.border;
-    if (!b || b.length < 8) return undefined;
-    const x = b[0] ?? 0;
-    const y = b[1] ?? 0;
-    const width = (b[2] ?? 0) - x;
-    const height = (b[7] ?? 0) - y;
-    return { x, y, width, height };
-  } catch {
-    return undefined;
-  }
-}
-
 // ── DOM enrichment (one snapshot for the whole page) ─────────────────────────
 
 interface DomEnrichment {
@@ -160,6 +146,21 @@ interface DomEnrichment {
   /** Has tabindex >= 0 — keyboard-focusable even without a semantic role. */
   readonly focusable: boolean;
   readonly href?: string;
+  readonly geometry?: NodeGeometry;
+}
+
+/** Viewport size in CSS pixels; zeros when the target will not report it. */
+async function layoutViewport(cdp: CDPHandle): Promise<{ width: number; height: number }> {
+  try {
+    const m = await cdp.send<LayoutMetricsResult>("Page.getLayoutMetrics", {});
+    const vp = m.cssLayoutViewport ?? m.cssVisualViewport;
+    if (vp && vp.clientWidth > 0 && vp.clientHeight > 0) {
+      return { width: vp.clientWidth, height: vp.clientHeight };
+    }
+  } catch {
+    // fall through
+  }
+  return { width: 0, height: 0 };
 }
 
 /**
@@ -168,8 +169,17 @@ interface DomEnrichment {
  * pushNodesByBackendIdsToFrontend + getAttributes × N links) with a single
  * round-trip, and supplies the clickability signal that lets us recover
  * role-less but interactive elements (div-soup UIs) the AX tree leaves generic.
+ *
+ * It also carries the layout rects, so geometry costs nothing extra. The old
+ * path issued one `DOM.getBoxModel` PER NODE and only at L2, which is why L1 —
+ * the tier the actuator actually runs on — had no idea whether a control was on
+ * screen. `layout.bounds` are document coordinates; subtracting the document's
+ * scroll offset puts them in the same viewport frame as `Input` dispatch.
  */
-async function captureDomEnrichment(cdp: CDPHandle): Promise<Map<number, DomEnrichment>> {
+async function captureDomEnrichment(
+  cdp: CDPHandle,
+  viewport: { width: number; height: number },
+): Promise<Map<number, DomEnrichment>> {
   const map = new Map<number, DomEnrichment>();
   try {
     const snap = await cdp.send<DomSnapshotResult>("DOMSnapshot.captureSnapshot", { computedStyles: [] });
@@ -179,6 +189,31 @@ async function captureDomEnrichment(cdp: CDPHandle): Promise<Map<number, DomEnri
     const clickable = new Set(doc.nodes.isClickable?.index ?? []);
     const beIds = doc.nodes.backendNodeId;
     const attrsArr = doc.nodes.attributes;
+
+    // layout.nodeIndex[i] is an index into nodes.*; bounds[i] is its box.
+    const scrollX = doc.scrollOffsetX ?? 0;
+    const scrollY = doc.scrollOffsetY ?? 0;
+    const boxByNodeIndex = new Map<number, NodeGeometry>();
+    const layout = doc.layout;
+    if (layout) {
+      for (let i = 0; i < layout.nodeIndex.length; i++) {
+        const ni = layout.nodeIndex[i];
+        const b = layout.bounds[i];
+        if (ni === undefined || !b || b.length < 4) continue;
+        const width = Math.round(b[2] ?? 0);
+        const height = Math.round(b[3] ?? 0);
+        if (width === 0 || height === 0) continue; // display:none / collapsed
+        const x = Math.round((b[0] ?? 0) - scrollX);
+        const y = Math.round((b[1] ?? 0) - scrollY);
+        const inViewport =
+          viewport.width > 0 &&
+          x + width > 0 &&
+          y + height > 0 &&
+          x < viewport.width &&
+          y < viewport.height;
+        boxByNodeIndex.set(ni, { x, y, width, height, inViewport });
+      }
+    }
 
     for (let i = 0; i < beIds.length; i++) {
       const beId = beIds[i];
@@ -192,7 +227,13 @@ async function captureDomEnrichment(cdp: CDPHandle): Promise<Map<number, DomEnri
         if (name === "href") href = val;
         else if (name === "tabindex" && val !== undefined && Number(val) >= 0) focusable = true;
       }
-      map.set(beId, { clickable: clickable.has(i), focusable, ...(href !== undefined ? { href } : {}) });
+      const geometry = boxByNodeIndex.get(i);
+      map.set(beId, {
+        clickable: clickable.has(i),
+        focusable,
+        ...(href !== undefined ? { href } : {}),
+        ...(geometry !== undefined ? { geometry } : {}),
+      });
     }
   } catch {
     // DOMSnapshot unavailable — degrade to a11y-only (no href / clickability).
@@ -213,8 +254,9 @@ export async function buildInteractionGraph(
     { depth: -1 },
   );
 
-  // One DOM snapshot for href + clickability, keyed by backendNodeId.
-  const domEnrich = await captureDomEnrichment(cdp);
+  // One DOM snapshot for href + clickability + geometry, keyed by backendNodeId.
+  const viewport = await layoutViewport(cdp);
+  const domEnrich = await captureDomEnrichment(cdp, viewport);
 
   // Build parent lookup
   const byId = new Map<string, AXNode>();
@@ -321,9 +363,9 @@ export async function buildInteractionGraph(
     });
     const nodeId = rawId as NodeId;
 
-    const geometry = includeGeometry && axNode.backendDOMNodeId
-      ? await fetchGeometry(cdp, axNode.backendDOMNodeId)
-      : undefined;
+    // Geometry now rides the snapshot, so L1 gets it too: the actuator runs on
+    // L1 and needs to know a control is below the fold BEFORE it acts.
+    const geometry = enrich?.geometry;
 
     // Build relations
     const relations: NodeRelation[] = [];

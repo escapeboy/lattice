@@ -18,6 +18,10 @@ export { GovernedActuator } from "./governed-actuator.js";
 export type { ReAnchor, GovernedActionResult, ActuatorContext, RateLimiterPort, RobotsCheckerPort, ActionDescriber } from "./governed-actuator.js";
 export { runLadder, locateInIG, RecoveryExecutor } from "./recovery.js";
 export { normalizeLabel, labelMatches } from "./label-match.js";
+export { pointerPointFor } from "./pointer-target.js";
+export { resolveTarget } from "./resolver.js";
+export type { ResolvedTarget } from "./resolver.js";
+export type { PointerPoint } from "./pointer-target.js";
 export type {
   RecoveryRung,
   RecoveryOutcome,
