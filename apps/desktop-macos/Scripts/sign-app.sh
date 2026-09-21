@@ -25,7 +25,7 @@ ENT="Signing/Lattice.entitlements"
 IDENTITY="${IDENTITY:-}"
 if [ -z "$IDENTITY" ]; then
   IDENTITY="$(security find-identity -v -p codesigning 2>/dev/null \
-    | grep -m1 'Developer ID Application' | sed -E 's/.*"(.*)".*/\1/')"
+    | grep -m1 'Developer ID Application' | sed -E 's/.*"(.*)".*/\1/' || true)"
   [ -z "$IDENTITY" ] && IDENTITY="-"
 fi
 
