@@ -36,8 +36,18 @@ public final class StackController: ObservableObject {
     /// Total things needing the operator (approvals + handoffs).
     public var needsAttention: Int { pendingApprovals + pendingHandoffs }
 
-    public let gatewayPort: Int
-    public let controlPlanePort: Int
+    /// Ports asked for (8765 / 7900 unless overridden by env).
+    public let preferredGatewayPort: Int
+    public let preferredControlPlanePort: Int
+    /// Ports in use. Differ from the preferred ones when those were taken by
+    /// another program at launch (see `PortPlanner`).
+    @Published public private(set) var gatewayPort: Int
+    @Published public private(set) var controlPlanePort: Int
+    /// What port planning did at the last start (reaped orphan, fallback port).
+    @Published public private(set) var portNotes: [String] = []
+    public var usesFallbackPort: Bool {
+        gatewayPort != preferredGatewayPort || controlPlanePort != preferredControlPlanePort
+    }
     public let host = "127.0.0.1"
     // STABLE across launches (Keychain-backed, like vault-key/handoff-key), not a
     // per-launch UUID. This lets an EXTERNAL MCP client — e.g. Claude Desktop
@@ -50,8 +60,14 @@ public final class StackController: ObservableObject {
     public let handoffNotifier = HandoffNotifier()
 
     private var supervisor: Supervisor?
+    /// Bumped by every start/stop, so a port plan that finishes after a stop
+    /// (or a newer start) is dropped instead of launching a stale stack.
+    private var startGeneration = 0
+    private var planning = false
 
     public init(gatewayPort: Int = 8765, controlPlanePort: Int = 7900) {
+        self.preferredGatewayPort = gatewayPort
+        self.preferredControlPlanePort = controlPlanePort
         self.gatewayPort = gatewayPort
         self.controlPlanePort = controlPlanePort
     }
@@ -60,13 +76,42 @@ public final class StackController: ObservableObject {
     public var healthURL: URL { URL(string: "http://\(host):\(gatewayPort)/health")! }
     public var controlPlaneURL: URL { URL(string: "http://\(host):\(controlPlanePort)")! }
 
-    /// Build the supervisor and launch the backend. No-op if already started.
+    /// Pick the ports, then build the supervisor and launch the backend. No-op
+    /// if already started. Port planning may stop a leftover backend (seconds),
+    /// so it runs off the main actor.
     public func startStack() {
-        guard supervisor == nil else { return }
+        guard supervisor == nil, !planning else { return }
         guard let backend = BackendLocator.backendBinary() else {
             state = .failed("backend binary not found (set LATTICE_BACKEND_DIR or build the .app)")
             return
         }
+        startGeneration += 1
+        let generation = startGeneration
+        planning = true
+        state = .starting
+        let host = host
+        let gw = preferredGatewayPort
+        let cp = preferredControlPlanePort
+        Task.detached {
+            let result = Result { try PortPlanner.plan(host: host, gateway: gw, controlPlane: cp) }
+            await MainActor.run { [weak self] in
+                guard let self, generation == self.startGeneration else { return }
+                self.planning = false
+                switch result {
+                case .success(let plan):
+                    self.launch(backend: backend, plan: plan)
+                case .failure(let error):
+                    self.portNotes = []
+                    self.state = .failed(String(describing: error))
+                }
+            }
+        }
+    }
+
+    private func launch(backend: URL, plan: PortPlan) {
+        gatewayPort = plan.gatewayPort
+        controlPlanePort = plan.controlPlanePort
+        portNotes = plan.notes
         let dataDir = BackendLocator.appSupportDirectory()
         // The backend log is append-only (O_APPEND fd redirect), so it would grow
         // unbounded across a long-running install. Roll it once at launch when it
@@ -93,6 +138,7 @@ public final class StackController: ObservableObject {
     private func handleState(_ s: StackState) {
         state = s
         if case .running = s, client == nil {
+            writeEndpointFile()
             // Connect a native MCP client for the control-plane views (D3/D4).
             let c = MCPClient(endpoint: mcpURL, token: mcpToken)
             Task { try? await c.connect() }
@@ -177,9 +223,31 @@ public final class StackController: ObservableObject {
 
     /// Tear the stack down cleanly (zero orphans). Safe to call on app quit.
     public func stopStack() {
+        startGeneration += 1
+        planning = false
         supervisor?.stop()
         supervisor = nil
         client = nil
+        try? FileManager.default.removeItem(at: Self.endpointFile)
+    }
+
+    /// Where the running stack's real URLs are published for local clients
+    /// (the stdio MCP bridges read it), since the ports can fall back.
+    nonisolated public static var endpointFile: URL {
+        BackendLocator.appSupportDirectory().appendingPathComponent("endpoint.json")
+    }
+
+    private func writeEndpointFile() {
+        let body: [String: Any] = [
+            "mcpUrl": mcpURL.absoluteString,
+            "controlPlaneUrl": controlPlaneURL.absoluteString,
+            "gatewayPort": gatewayPort,
+            "controlPlanePort": controlPlanePort,
+            "pid": Int(ProcessInfo.processInfo.processIdentifier),
+        ]
+        guard let data = try? JSONSerialization.data(withJSONObject: body, options: [.prettyPrinted, .sortedKeys])
+        else { return }
+        try? data.write(to: Self.endpointFile, options: .atomic)
     }
 
     /// Roll `backend.log` to `backend.log.1` when it exceeds the size cap (5 MB),

@@ -14,12 +14,29 @@
 //     is opt-in with polling alternatives (perceive_snapshot/perceive_delta); approvals
 //     flow through the control plane, not MCP push. No stream to lose.
 //
-// Env: LATTICE_MCP_URL (default http://127.0.0.1:8765/mcp), LATTICE_AUTH ("Bearer <token>"),
-//      LATTICE_BRIDGE_TIMEOUT_MS.
+// Env: LATTICE_MCP_URL (default: the running desktop app's endpoint.json, else
+//      http://127.0.0.1:8765/mcp), LATTICE_AUTH ("Bearer <token>"), LATTICE_BRIDGE_TIMEOUT_MS.
 
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 
-const URL_ = process.env.LATTICE_MCP_URL || "http://127.0.0.1:8765/mcp";
+const DEFAULT_URL = "http://127.0.0.1:8765/mcp";
+const ENDPOINT_FILE = join(homedir(), "Library", "Application Support", "Lattice", "endpoint.json");
+
+// The desktop app falls back to another port when 8765 is taken and writes the
+// real URL to endpoint.json. Read it per request, so a restart on a new port is
+// picked up; ignore it when the app that wrote it is gone.
+function mcpUrl() {
+  if (process.env.LATTICE_MCP_URL) return process.env.LATTICE_MCP_URL;
+  try {
+    const ep = JSON.parse(readFileSync(ENDPOINT_FILE, "utf8"));
+    process.kill(ep.pid, 0);
+    if (typeof ep.mcpUrl === "string") return ep.mcpUrl;
+  } catch { /* no file, stale pid, or bad JSON */ }
+  return DEFAULT_URL;
+}
 const AUTH = process.env.LATTICE_AUTH || "";
 const TIMEOUT = Number(process.env.LATTICE_BRIDGE_TIMEOUT_MS || 60_000);
 
@@ -42,7 +59,7 @@ function headers() {
 
 /** POST one JSON-RPC message. Returns {status, json|null} or throws on network/timeout. */
 async function post(msg) {
-  const res = await fetch(URL_, {
+  const res = await fetch(mcpUrl(), {
     method: "POST",
     headers: headers(),
     body: JSON.stringify(msg),
@@ -123,4 +140,4 @@ rl.on("line", (line) => {
   // responses from client (to server requests) can't occur: the gateway never sends requests
 });
 rl.on("close", () => process.exit(0));
-log(`ready → ${URL_} (timeout ${TIMEOUT}ms)`);
+log(`ready → ${mcpUrl()} (timeout ${TIMEOUT}ms)`);

@@ -10,7 +10,8 @@ if [ ! -r "$SECRET" ]; then
   exit 1
 fi
 
-export LATTICE_MCP_URL="${LATTICE_MCP_URL:-http://127.0.0.1:8765/mcp}"
+# LATTICE_MCP_URL is left unset unless given, so the bridge follows the desktop
+# app's endpoint.json when the app had to fall back to another port.
 export LATTICE_AUTH="Bearer $(cat "$SECRET")"
 
 exec /opt/homebrew/bin/node "$(dirname "$0")/lattice-mcp-bridge.mjs"
