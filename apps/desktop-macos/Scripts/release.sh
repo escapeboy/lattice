@@ -14,6 +14,15 @@
 #   IDENTITY="Developer ID Application: NAME (TEAMID)"  signing identity
 #                          (default: auto-detect from keychain via sign-app.sh)
 #   NOTARY_PROFILE=lattice-notary   notarytool keychain profile (stored once)
+#   NOTARY_KEY_ID / NOTARY_ISSUER / NOTARY_KEY_OP_ITEM
+#                          notarize with an App Store Connect API key instead:
+#                          the .p8 is fetched from 1Password (`op document get`
+#                          on NOTARY_KEY_OP_ITEM in NOTARY_KEY_OP_VAULT, default
+#                          "AI Agent") into a 0600 temp file, removed on exit.
+#                          Works with the screen locked; the keychain profile
+#                          lives in the data-protection keychain, which does not.
+#   ~/.config/lattice/release.env   sourced first when present, so these
+#                          machine-local settings stay out of the repo.
 #   SKIP_NOTARIZE=1        build + sign + DMG only (local dry build, not shippable)
 #   PUBLISH=1             after a green build: commit the appcast bump, push, and
 #                          `gh release upload` the DMG. WITHOUT this the script
@@ -27,6 +36,10 @@ set -euo pipefail
 
 VERSION="${1:-}"
 [ -n "$VERSION" ] || { echo "ERROR: version required, e.g. Scripts/release.sh 0.2.0" >&2; exit 1; }
+
+RELEASE_ENV="${LATTICE_RELEASE_ENV:-$HOME/.config/lattice/release.env}"
+# shellcheck source=/dev/null
+[ -f "$RELEASE_ENV" ] && . "$RELEASE_ENV"
 
 DESKTOP="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 REPO="$(cd "$DESKTOP/../.." && pwd)"
@@ -79,8 +92,19 @@ else
   IDENT="${IDENTITY:-$(security find-identity -v -p codesigning 2>/dev/null | grep -m1 'Developer ID Application' | sed -E 's/.*"(.*)".*/\1/')}"
   [ -n "$IDENT" ] || { echo "ERROR: no Developer ID identity for DMG signing." >&2; exit 1; }
   codesign --force --sign "$IDENT" --timestamp "$DIST_DMG"
-  echo "==> notarytool submit (profile: $NOTARY_PROFILE) — waiting…"
-  xcrun notarytool submit "$DIST_DMG" --keychain-profile "$NOTARY_PROFILE" --wait
+  if [ -n "${NOTARY_KEY_ID:-}" ] && [ -n "${NOTARY_ISSUER:-}" ] && [ -n "${NOTARY_KEY_OP_ITEM:-}" ]; then
+    NOTARY_KEY_FILE="$(mktemp -t lattice-notary).p8"
+    trap 'rm -f "$NOTARY_KEY_FILE"' EXIT
+    op document get "$NOTARY_KEY_OP_ITEM" --vault "${NOTARY_KEY_OP_VAULT:-AI Agent}" \
+      --out-file "$NOTARY_KEY_FILE" --force >/dev/null
+    chmod 600 "$NOTARY_KEY_FILE"
+    NOTARY_AUTH=(--key "$NOTARY_KEY_FILE" --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER")
+    echo "==> notarytool submit (API key $NOTARY_KEY_ID) — waiting…"
+  else
+    NOTARY_AUTH=(--keychain-profile "$NOTARY_PROFILE")
+    echo "==> notarytool submit (profile: $NOTARY_PROFILE) — waiting…"
+  fi
+  xcrun notarytool submit "$DIST_DMG" "${NOTARY_AUTH[@]}" --wait
   echo "==> stapler staple"
   xcrun stapler staple "$DIST_DMG"
   spctl -a -t open --context context:primary-signature "$DIST_DMG"

@@ -39,6 +39,19 @@ xcrun notarytool store-credentials lattice-notary \
   --apple-id you@example.com --team-id TEAMID --password <app-specific-password>
 ```
 
+A stored profile sits in the data-protection keychain, which macOS closes while
+the screen is locked (`No Keychain password item found for profile`). For
+unattended releases, `Scripts/release.sh` can instead fetch an API key's `.p8`
+from 1Password. Put this in `~/.config/lattice/release.env` (sourced by the
+script, kept out of the repo):
+```bash
+NOTARY_KEY_ID=<KEY_ID>
+NOTARY_ISSUER=<ISSUER_ID>
+NOTARY_KEY_OP_ITEM="<1Password document item holding the .p8>"
+# NOTARY_KEY_OP_VAULT defaults to "AI Agent"; `op` must be signed in or have
+# OP_SERVICE_ACCOUNT_TOKEN set.
+```
+
 ## 3. Submit + wait
 ```bash
 xcrun notarytool submit build/Lattice.dmg --keychain-profile lattice-notary --wait
