@@ -224,22 +224,6 @@ enum PortProbe {
     /// "node (PID 1516)" for the process listening on the port, via lsof.
     /// Best-effort: nil when lsof is unavailable or finds nothing.
     static func listenerDescription(port: Int) -> String? {
-        let task = Process()
-        task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
-        task.arguments = ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN", "-Fpc"]
-        let out = Pipe()
-        task.standardOutput = out
-        task.standardError = FileHandle.nullDevice
-        do { try task.run() } catch { return nil }
-        let data = out.fileHandleForReading.readDataToEndOfFile()
-        task.waitUntilExit()
-        var pid: String?
-        var name: String?
-        for line in String(decoding: data, as: UTF8.self).split(separator: "\n") {
-            if line.hasPrefix("p"), pid == nil { pid = String(line.dropFirst()) }
-            if line.hasPrefix("c"), name == nil { name = String(line.dropFirst()) }
-        }
-        guard let pid else { return nil }
-        return "\(name ?? "process") (PID \(pid))"
+        listener(port: port).map { "\($0.1) (PID \($0.0))" }
     }
 }

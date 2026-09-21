@@ -37,6 +37,34 @@ public struct MenuBarContent: View {
                       systemImage: "rectangle.3.group")
                     .font(.caption)
                     .foregroundStyle(stack.liveSessions > 0 ? .primary : .secondary)
+                HStack(spacing: 4) {
+                    Text(stack.mcpURL.absoluteString)
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                    Button {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(stack.mcpURL.absoluteString, forType: .string)
+                    } label: {
+                        Image(systemName: "doc.on.doc")
+                    }
+                    .buttonStyle(.plain)
+                    .help("Copy MCP URL")
+                    .accessibilityLabel("Copy MCP URL")
+                }
+                if stack.gatewayPort != stack.preferredGatewayPort {
+                    Text("Port \(stack.preferredGatewayPort) was busy. MCP clients set to \(stack.preferredGatewayPort) (e.g. Claude Code) need this URL.")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
+            ForEach(stack.portNotes, id: \.self) { note in
+                Text(note)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if stack.needsAttention > 0 {
