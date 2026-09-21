@@ -70,7 +70,20 @@ export class BuildOnSession {
   ) {
     // Re-anchoring reads the LATEST perceived snapshot's ref map, so identity
     // resolution always tracks the current DOM even across re-renders.
-    const anchor: ReAnchor = { refFor: (nodeId) => this.lastIG?.refMap.get(nodeId) };
+    const anchor: ReAnchor = {
+      refFor: (nodeId) => this.lastIG?.refMap.get(nodeId),
+      // The effect gate classifies on what the control IS; the accessible name
+      // is the richest single signal and the engine seam cannot read one.
+      nodeFor: (nodeId) => {
+        const node = this.lastIG?.graph.nodes.get(nodeId);
+        if (!node) return undefined;
+        return {
+          role: node.role,
+          label: node.label,
+          ...(node.href !== undefined ? { href: this.absolute(node.href) } : {}),
+        };
+      },
+    };
     // Perception-aware enrichment for the approval panel: the actuator has no
     // labels/filled-field context; this session does.
     const describer: ActionDescriber = {
@@ -99,6 +112,17 @@ export class BuildOnSession {
       ...(fields ? { fields } : {}),
       ...(intent ? { intent } : {}),
     };
+  }
+
+  /** Resolve a possibly-relative href against the perceived page URL. */
+  private absolute(href: string): string {
+    const base = this.lastIG?.graph.url;
+    if (!base) return href;
+    try {
+      return new URL(href, base).href;
+    } catch {
+      return href;
+    }
   }
 
   /** Origin of the last-perceived page URL, or undefined if not resolvable. */

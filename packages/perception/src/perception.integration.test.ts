@@ -212,3 +212,53 @@ describeIfBrowser("@lattice/perception — integration (S2)", () => {
     expect(realButtons).toHaveLength(1);
   });
 });
+
+describeIfBrowser("AX role mapping — form controls Chrome names without spaces", () => {
+  /**
+   * Regression: ROLE_MAP keyed `search box`, `spin button` and `radio button`,
+   * but Chrome emits `searchbox`, `spinbutton` and `radio`. Those controls fell
+   * through the map and never reached the graph, so a search input could not be
+   * addressed at all — found while trying to drive site search on two live
+   * sites and getting an empty candidate list.
+   */
+  const FORM_HTML = `<!DOCTYPE html><html lang="en"><head><title>Controls</title></head><body>
+    <input type="search" aria-label="Search site">
+    <input type="number" aria-label="Quantity">
+    <input type="radio" name="g" aria-label="Pick one">
+    <input type="range" aria-label="Volume">
+    <input type="text" aria-label="Full name">
+  </body></html>`;
+
+  let server: Server;
+  let url: string;
+  let adapter: EngineAdapter;
+
+  beforeAll(async () => {
+    const started = await startTestServer(FORM_HTML);
+    server = started.server;
+    url = started.url;
+    adapter = createEngineAdapter();
+    await adapter.launch({ headless: true, ...(executablePath ? { executablePath } : {}) });
+  });
+
+  afterAll(async () => {
+    await adapter?.shutdown();
+    server?.close();
+  });
+
+  it("surfaces search, number, radio and range inputs in the graph", async () => {
+    const ctx = await adapter.createContext();
+    try {
+      await ctx.navigate(url);
+      const ig = (await createPerceptionEngine(ctx.cdp()).snapshot("L1")) as InteractionGraph;
+      const byLabel = new Map([...ig.nodes.values()].map((n) => [n.label, n.role]));
+      expect(byLabel.get("Search site"), "search input missing from the IG").toBe("input");
+      expect(byLabel.get("Quantity"), "number input missing from the IG").toBe("input");
+      expect(byLabel.get("Pick one"), "radio missing from the IG").toBe("radio");
+      expect(byLabel.get("Volume"), "range input missing from the IG").toBe("input");
+      expect(byLabel.get("Full name")).toBe("input");
+    } finally {
+      await ctx.close();
+    }
+  });
+});

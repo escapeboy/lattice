@@ -105,13 +105,23 @@ describe("build-on gateway — external MCP client drives the build-on stack (S6
     expect(nodes.map((n) => n.role)).toContain("button");
     expect(nodes.map((n) => n.role)).toContain("input");
 
-    // Act by stable NodeId — the gateway re-anchors it to the engine's ref.
-    const buttonId = nodes.find((n) => n.role === "button")!.id;
+    // Act by stable NodeId — the gateway re-anchors it to the engine's ref. The
+    // link is the benign leg: same origin, neutral label, nothing to raise it.
+    const linkId = nodes.find((n) => n.role === "link")!.id;
     const res = toolJson(
-      await client.callTool({ name: "act_execute", arguments: { sessionId, command: { type: "act", target: { nodeId: buttonId } } } }),
+      await client.callTool({ name: "act_execute", arguments: { sessionId, command: { type: "act", target: { nodeId: linkId } } } }),
     );
     expect(res["success"]).toBe(true);
     expect(engine.acts.at(-1)).toMatchObject({ type: "click" });
+
+    // And the same verb on the "Submit" button does NOT auto-grant — the effect
+    // gate classifies on the target, so the cheap verb buys nothing.
+    const buttonId = nodes.find((n) => n.role === "button")!.id;
+    const gated = await client.callTool({
+      name: "act_execute",
+      arguments: { sessionId, command: { type: "act", target: { nodeId: buttonId } } },
+    });
+    expect(JSON.stringify(gated)).toMatch(/prohibit|grant|block|human/i);
 
     await client.close();
     await gateway.stop();

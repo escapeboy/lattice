@@ -4,6 +4,11 @@
  * The NodeId encodes the backendDOMNodeId in its hash prefix when the node was
  * created with a real CDP backendDOMNodeId. We extract it here by querying the
  * current AX tree and re-matching by nodeId string.
+ *
+ * Identity only. The click point is NOT computed here: a coordinate taken at
+ * resolve time can be stale or off-screen by the time the event is dispatched,
+ * which is exactly the failure this package had. Geometry comes from
+ * `pointerPointFor` immediately before dispatch.
  */
 
 import type { CDPHandle } from "@lattice/engine";
@@ -22,19 +27,12 @@ interface GetFullAXTreeResult {
   nodes: AXNode[];
 }
 
-interface GetBoxModelResult {
-  model: { content: number[] };
-}
-
 interface PushNodesResult {
   nodeIds: number[];
 }
 
 export interface ResolvedTarget {
   backendDOMNodeId: number;
-  /** Center point for Input dispatch */
-  x: number;
-  y: number;
   role: string;
   disabled: boolean;
 }
@@ -84,24 +82,7 @@ export async function resolveTarget(
       const disabled = axNode.properties?.some(
         (p) => p.name === "disabled" && p.value.value === true,
       ) ?? false;
-      const role = rawRole;
-
-      // Get center point via DOM.getBoxModel
-      try {
-        const { model } = await cdp.send<GetBoxModelResult>("DOM.getBoxModel", {
-          backendNodeId: axNode.backendDOMNodeId,
-        });
-        const c = model.content;
-        const x = ((c[0] ?? 0) + (c[2] ?? 0)) / 2;
-        const y = ((c[1] ?? 0) + (c[5] ?? 0)) / 2;
-        return { backendDOMNodeId: axNode.backendDOMNodeId, x, y, role, disabled };
-      } catch {
-        throw new ActionError(
-          "obscured",
-          "element has no layout box",
-          `Cannot get bounding box for node ${nodeId}`,
-        );
-      }
+      return { backendDOMNodeId: axNode.backendDOMNodeId, role: rawRole, disabled };
     }
   }
 

@@ -1,0 +1,25 @@
+{
+  "name": "@lattice/spike-jev-actions",
+  "version": "0.0.0",
+  "license": "Apache-2.0",
+  "private": true,
+  "type": "module",
+  "//": "THROWAWAY SPIKE. Nothing that ships may import this package. It has no `build` script on purpose: the root `pnpm build` runs `build` per package, so omitting it keeps the spike out of the workspace build, and the bun single-binary compiles from apps/serve/dist/main.js, which never reaches here.",
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "dependencies": {
+    "@lattice/action": "workspace:*",
+    "@lattice/engine": "workspace:*",
+    "@lattice/kernel": "workspace:*",
+    "@lattice/perception": "workspace:*",
+    "@lattice/robots": "workspace:*",
+    "@anthropic-ai/sdk": "^0.70.0"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

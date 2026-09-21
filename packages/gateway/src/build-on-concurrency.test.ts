@@ -43,7 +43,7 @@ class FakeSession implements EngineSession {
     return Promise.resolve("https://x/");
   }
   snapshot(): Promise<RawSnapshot> {
-    return Promise.resolve({ url: "https://x/", refs: [], tree: '- button "Go" [ref=e1]' });
+    return Promise.resolve({ url: "https://x/", refs: [], tree: '- button "Go" [ref=e1]\n- link "Home" [ref=e2]' });
   }
   readText(): Promise<string> {
     return Promise.resolve("t");
@@ -121,8 +121,11 @@ describe("build-on trace emission (S7)", () => {
     const ig = (await session.perception.snapshot("L1")) as InteractionGraph;
     session.lastSnapshot = ig;
     session.recorder.recordSnapshot(ig.tier, ig.url, ig.title, [...ig.nodes.values()]);
-    const buttonId = [...ig.nodes.values()].find((n) => n.role === "button")!.id;
-    await session.action.execute({ type: "act", target: { nodeId: buttonId } });
+    // A benign control: clicking the "Go" button is consequential under the
+    // effect gate (a bare button might submit a form), and this test is about
+    // trace emission, not governance.
+    const linkId = [...ig.nodes.values()].find((n) => n.role === "link")!.id;
+    await session.action.execute({ type: "act", target: { nodeId: linkId } });
     session.recorder.recordActionResult(true, ig.url, undefined);
 
     const trace = await reg.destroy(session.id);

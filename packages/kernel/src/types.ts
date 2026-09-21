@@ -2,6 +2,10 @@
  * Security Kernel public types.
  */
 
+import type { EffectEvidence, EffectVerdict } from "./effect.js";
+
+export type { EffectEvidence };
+
 /** Opaque wrapper for page-origin content — structurally prevents
  *  promotion to instruction context at the type level. */
 export type TaintedStr = string & { readonly __taint: true };
@@ -50,6 +54,14 @@ export interface CapabilityRequest {
   readonly payload: unknown;
   /** Operator-facing enrichment (see ActionDetail). Optional. */
   readonly detail?: ActionDetail;
+  /**
+   * Deterministic probe output about the action's TARGET. When present the
+   * kernel classifies on the real effect, not on the verb name — see
+   * `classifyEffect`. Absent on a request that has no target (navigation) or
+   * from a caller with no probe; for an acting verb, absent means "unknown",
+   * which classifies as consequential rather than benign.
+   */
+  readonly effect?: EffectEvidence;
 }
 
 export interface GrantDecision {
@@ -130,6 +142,8 @@ export interface KernelConfig {
 
 export interface SecurityKernel {
   classify(request: CapabilityRequest): PolicyClass;
+  /** Classification plus the signal trail that produced it. */
+  classifyDetailed(request: CapabilityRequest): EffectVerdict;
   requestGrant(request: CapabilityRequest): Promise<GrantDecision>;
   /**
    * Wire the human grant handler for consequential actions after construction.

@@ -38,11 +38,21 @@ export type NodeRole =
   | "iframe"
   | "generic";
 
+/**
+ * Viewport-relative CSS pixels — the same frame `Input.dispatchMouseEvent`
+ * uses, so a reader can tell whether a node is reachable without scrolling.
+ *
+ * ADVISORY ONLY. It is a snapshot; the page may scroll or reflow before an
+ * action runs. The actuator re-reads geometry and hit-tests immediately before
+ * dispatch (`pointerPointFor`) and never clicks these numbers.
+ */
 export interface NodeGeometry {
   x: number;
   y: number;
   width: number;
   height: number;
+  /** Box intersects the layout viewport. False = a scroll is needed first. */
+  inViewport: boolean;
 }
 
 export interface NodeRelation {

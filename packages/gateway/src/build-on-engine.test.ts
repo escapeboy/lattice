@@ -22,7 +22,7 @@ const ORIGIN = "https://app.example.com";
 
 class FakeEngine implements EngineSession {
   readonly id = "lattice-fake" as EngineSession["id"];
-  tree = '- button "Submit" [ref=e1]\n- textbox "Email" [ref=e2]';
+  tree = '- button "Submit" [ref=e1]\n- textbox "Email" [ref=e2]\n- link "Home" [ref=e3]';
   acts: SemanticAction[] = [];
   navigate(url: string): Promise<NavResult> {
     return Promise.resolve({ url, title: "" });
@@ -69,17 +69,17 @@ describe("BuildOnPerceptionAdapter — implements PerceptionEngine", () => {
     const { perception } = build();
     const l1 = (await perception.snapshot("L1")) as InteractionGraph;
     expect(l1.tier).toBe("L1");
-    expect(l1.nodes.size).toBe(2);
+    expect(l1.nodes.size).toBe(3);
 
     const l0 = await perception.snapshot("L0");
     expect(l0.tier).toBe("L0");
-    if (l0.tier === "L0") expect(l0.interactiveCount).toBe(2);
+    if (l0.tier === "L0") expect(l0.interactiveCount).toBe(3);
   });
 
   it("delta of two graphs uses stable-id diffing", async () => {
     const { perception, engine } = build();
     const a = (await perception.snapshot("L1")) as InteractionGraph;
-    engine.tree = '- button "Submit" [ref=e7]'; // Email removed; Submit ref churned
+    engine.tree = '- button "Submit" [ref=e7]\n- link "Home" [ref=e3]'; // Email removed; Submit ref churned
     const b = (await perception.snapshot("L1")) as InteractionGraph;
     const d = perception.delta(a, b);
     expect(d.removed).toHaveLength(1); // Email gone
@@ -97,10 +97,20 @@ describe("BuildOnActionAdapter — implements ActionEngine", () => {
   it("execute returns ground-truth ActionResult with a delta and url", async () => {
     const { action, perception } = build();
     await perception.snapshot("L1"); // establish anchor
-    const res = await action.execute({ type: "act", target: { nodeId: firstButtonId(await firstGraph(perception)) } });
+    // A same-origin link with a neutral label: the effect gate has nothing to
+    // raise it on. Clicking the "Submit" button is now consequential (below).
+    const res = await action.execute({ type: "act", target: { nodeId: benignLinkId(await firstGraph(perception)) } });
     expect(res.success).toBe(true);
     expect(res.url).toContain(ORIGIN);
     expect(res.delta).toBeDefined();
+  });
+
+  it("EFFECT-GATE: `act` on the control labelled Submit is consequential, not benign", async () => {
+    const { action, perception } = build();
+    await perception.snapshot("L1");
+    await expect(
+      action.execute({ type: "act", target: { nodeId: firstButtonId(await firstGraph(perception)) } }),
+    ).rejects.toThrow();
   });
 
   it("a gated consequential action propagates the kernel refusal (engine contract)", async () => {
@@ -116,7 +126,7 @@ describe("BuildOnActionAdapter — implements ActionEngine", () => {
   it("benign action keeps the old contract (success/url/delta) and adds gated:false", async () => {
     const { action, perception } = build();
     await perception.snapshot("L1");
-    const res = await action.execute({ type: "act", target: { nodeId: firstButtonId(await firstGraph(perception)) } });
+    const res = await action.execute({ type: "act", target: { nodeId: benignLinkId(await firstGraph(perception)) } });
     // Old consumer reads ONLY these three — unchanged shape and values.
     const { success, url, delta } = res;
     expect(success).toBe(true);
@@ -157,4 +167,8 @@ async function firstGraph(p: BuildOnPerceptionAdapter): Promise<InteractionGraph
 }
 function firstButtonId(g: InteractionGraph) {
   return [...g.nodes.values()].find((n) => n.role === "button")!.id;
+}
+/** A same-origin link with a neutral label — the effect gate leaves it benign. */
+function benignLinkId(g: InteractionGraph) {
+  return [...g.nodes.values()].find((n) => n.role === "link")!.id;
 }

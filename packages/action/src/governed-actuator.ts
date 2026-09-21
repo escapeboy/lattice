@@ -14,9 +14,10 @@
  * rather than a file path into the engine.
  */
 
-import type { ActionDetail, SecurityKernel } from "@lattice/kernel";
+import type { ActionDetail, EffectEvidence, SecurityKernel } from "@lattice/kernel";
 import type { EngineSession, Locator, SemanticAction } from "@lattice/engine-adapter";
 import type { NodeId } from "@lattice/perception";
+import { collectEngineEvidence, type PerceivedNode } from "./engine-evidence.js";
 import { ActionError } from "./types.js";
 import type { ActionCommand } from "./types.js";
 
@@ -32,6 +33,14 @@ export interface ActionDescriber {
 /** Re-anchoring source: maps a stable NodeId to the current snapshot's ref. */
 export interface ReAnchor {
   refFor(nodeId: NodeId): string | undefined;
+  /**
+   * The perceived node behind this id (role / label / href), when the caller
+   * holds an Interaction Graph. Feeds the effect gate: the label is the single
+   * richest signal and the engine seam has no way to read an accessible name.
+   * Optional — its absence costs precision, never safety, because an unknown
+   * target classifies as consequential.
+   */
+  nodeFor?(nodeId: NodeId): PerceivedNode | undefined;
 }
 
 export interface GovernedActionResult {
@@ -57,6 +66,12 @@ export interface GovernedActionResult {
   readonly gated?: boolean;
   readonly grantId?: string;
   readonly policyClass?: string;
+  /**
+   * Whether the network backstop covered this action. Present on every
+   * auto-granted action that touched the page, so "no escalation happened" can
+   * be told apart from "nothing was watching".
+   */
+  readonly backstop?: BackstopState;
 }
 
 /**
@@ -80,6 +95,24 @@ export interface RobotsCheckerPort {
   allowed(url: string): Promise<boolean>;
 }
 
+/**
+ * Network backstop port. `EffectBackstop` (CDP) satisfies it; structural so the
+ * action package does not depend on a transport.
+ *
+ * It exists because the static classifier has one blind spot it cannot close:
+ * a control that reads benign on every DOM signal and POSTs from JavaScript.
+ * The evidence only exists after the click, so something has to watch the wire.
+ */
+export interface EffectBackstopPort {
+  /** Begin holding requests attributable to the action about to be dispatched. */
+  arm(frameId?: string): Promise<void>;
+  /** Stop holding. */
+  disarm(): Promise<void>;
+}
+
+/** Why the backstop did not run for an action. Carried on the result. */
+export type BackstopState = "armed" | "disabled" | "unavailable";
+
 export interface ActuatorContext {
   /** Origin the task is scoped to (for kernel classification/egress). */
   readonly origin: string;
@@ -88,6 +121,20 @@ export interface ActuatorContext {
   readonly rateLimiter?: RateLimiterPort;
   /** Optional robots.txt gate; when present, a disallowed navigation is refused. */
   readonly robots?: RobotsCheckerPort;
+  /**
+   * Network backstop. ON by default: when a port is supplied it is armed around
+   * every auto-granted action, with no opt-in.
+   *
+   * When NO port is supplied the actuator cannot watch the wire, and it says so
+   * on every result (`backstop: "unavailable"`) rather than reporting a
+   * protection it does not have. That is the state on the build-on engine seam
+   * today: agent-browser's `network` primitive is firewalled and the egress
+   * proxy sees only `CONNECT host:port` over HTTPS, so neither can supply the
+   * method, body or initiator this needs.
+   */
+  readonly backstop?: EffectBackstopPort;
+  /** Explicitly turn the backstop off. A deliberate, recorded choice. */
+  readonly backstopDisabled?: boolean;
 }
 
 export class GovernedActuator {
@@ -126,17 +173,22 @@ export class GovernedActuator {
       return { ok: true, url: res.url, ...(res.settled === false ? { settled: false } : {}) };
     }
 
-    // Effect-based classification (close the verb-name gate bypass). The engine
-    // compiles `submit` and a click on the submit control to the SAME operation
-    // (`click @ref`), so an agent could dodge the consequential gate by sending
-    // `act` (click) on a submit button instead of `submit`. The verb the agent
-    // chose must NOT decide consequentiality — the target does. A click on an
-    // explicit submit control is a form submission, so classify it as `submit`
-    // and route it through the same human grant.
+    // Liveness before governance: a NodeId with no live ref is a stale
+    // perception, not a policy question. Gating it first would report a
+    // re-perceivable staleness as a policy refusal.
+    if ("target" in command && this.anchor.refFor(command.target.nodeId) === undefined) {
+      throw new ActionError("element_gone", "re-perceive", `no live ref for node ${command.target.nodeId}`);
+    }
+
+    // Effect-based classification. The verb the agent chose must NOT decide
+    // consequentiality — the target does. The engine compiles `submit` and a
+    // click on the submit control to the SAME operation (`click @ref`), so
+    // gating on the verb let an agent dodge the human grant by sending `act`.
+    // Evidence about the target is collected FIRST and handed to the kernel, so
+    // there is no path where the gate runs without it.
+    const evidence = await this.evidenceFor(command);
     const actionType =
-      command.type === "act" && (await this.isSubmitControl(command.target.nodeId))
-        ? "submit"
-        : command.type;
+      command.type === "act" && evidence?.submitControl === true ? "submit" : command.type;
 
     const detail = this.describer?.describe(command, actionType);
     const request = {
@@ -145,6 +197,7 @@ export class GovernedActuator {
       sessionId: this.ctx.sessionId,
       payload: command,
       ...(detail ? { detail } : {}),
+      ...(evidence ? { effect: evidence } : {}),
     };
     // Classify once so the result can tell the agent WHETHER this passed a human
     // grant. `consequential` → the grant was a human approval (gated); read/benign
@@ -169,30 +222,52 @@ export class GovernedActuator {
       return { ok: true, url, extracted: text, ...meta };
     }
 
-    // 2 + 3. Re-anchor and execute.
-    const result = await this.engine.act(this.toSemanticAction(command));
-    if (!result.ok) {
-      throw new ActionError(mapEngineError(result.error), "re-perceive", result.error ?? "action failed");
+    // 2 + 3. Re-anchor and execute, with the backstop armed.
+    //
+    // Only for an AUTO-GRANTED action: a consequential one already carries its
+    // human grant, and asking again for the request it obviously makes would be
+    // a second prompt for the same decision. The window opens BEFORE dispatch,
+    // because interception only affects requests started after it takes effect.
+    const backstopState = this.backstopState(policyClass);
+    if (backstopState === "armed") await this.ctx.backstop!.arm();
+    try {
+      const result = await this.engine.act(this.toSemanticAction(command));
+      if (!result.ok) {
+        throw new ActionError(mapEngineError(result.error), "re-perceive", result.error ?? "action failed");
+      }
+      return { ok: true, url: result.url, ...meta, backstop: backstopState };
+    } finally {
+      if (backstopState === "armed") await this.ctx.backstop!.disarm().catch(() => undefined);
     }
-    return { ok: true, url: result.url, ...meta };
   }
 
   /**
-   * True when the click target is an EXPLICIT submit control — `<input
-   * type=submit|image>` or `<button type=submit>`. Read via the engine's
-   * non-eval `get attr` probe; absent/undetectable → false. A bare `<button>`
-   * whose DEFAULT type is submit is NOT caught (that needs DOM/form
-   * introspection the engine firewall forbids) — a documented residual, far
-   * narrower than gating on the verb name alone. Degrades to false when the
-   * engine has no `getAttr` (test/CDP fakes) — the verb classification still
-   * gates an explicit `submit`.
+   * Whether to arm for this action.
+   *
+   * Only an AUTO-GRANTED action is watched. A consequential one already passed
+   * a human, and holding the request it obviously makes would ask the same
+   * person the same question twice — the fastest way to get a gate turned off.
+   *
+   * `unavailable` is reported rather than silently treated as "fine": a gate
+   * that cannot see the wire should say so.
    */
-  private async isSubmitControl(nodeId: NodeId): Promise<boolean> {
-    if (!this.engine.getAttr) return false;
-    const ref = this.anchor.refFor(nodeId);
-    if (!ref) return false; // stale node — locator() raises element_gone downstream
-    const type = (await this.engine.getAttr(ref, "type").catch(() => undefined))?.toLowerCase();
-    return type === "submit" || type === "image";
+  private backstopState(policyClass: string): BackstopState {
+    if (policyClass !== "read" && policyClass !== "benign") return "disabled";
+    if (this.ctx.backstopDisabled === true) return "disabled";
+    return this.ctx.backstop ? "armed" : "unavailable";
+  }
+
+  /**
+   * Deterministic facts about the command's target, for the kernel's effect
+   * classification. `undefined` only for commands with no element target — the
+   * kernel classifies those on the verb alone. For a targeted command this
+   * ALWAYS returns evidence, even if every field is unknown, because "no
+   * evidence" is itself the signal that makes the action consequential.
+   */
+  private async evidenceFor(command: ActionCommand): Promise<EffectEvidence | undefined> {
+    if (!("target" in command)) return undefined;
+    const nodeId = command.target.nodeId;
+    return collectEngineEvidence(this.engine, this.anchor.refFor(nodeId), this.anchor.nodeFor?.(nodeId));
   }
 
   /** Resolve a command's target NodeId to the engine's current ref, or fail typed. */

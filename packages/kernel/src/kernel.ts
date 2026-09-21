@@ -14,6 +14,8 @@
 import { randomUUID } from "node:crypto";
 import { taint } from "./types.js";
 import { CONSTITUTIONAL_FLOOR, OperatorGate } from "./operator.js";
+import { classifyEffect, type EffectVerdict } from "./effect.js";
+import { EFFECT_LEXICON_VERSION } from "./effect-lexicon.js";
 import type {
   AuditEvent,
   CapabilityRequest,
@@ -61,6 +63,25 @@ const READ_DEFAULTS = new Set([
   "search",
 ]);
 
+/**
+ * Verbs that act on a specific element. These are the ones whose real class
+ * depends on WHAT they touch, so they always go through the effect classifier —
+ * including when no probe result arrived, which is the "unknown" case.
+ *
+ * `navigate` is absent on purpose: it has no element target and is scope-checked
+ * by `checkNavigation` instead.
+ */
+const TARGETED_VERBS: ReadonlySet<string> = new Set([
+  "act", "fill", "select", "set", "submit", "scroll_to",
+  "upload", "download", "click", "extract",
+]);
+
+/** Severity max, mirroring `effect.ts`. Used only as a boundary re-assertion. */
+function raiseClass(a: PolicyClass, b: PolicyClass): PolicyClass {
+  const order: Record<PolicyClass, number> = { read: 0, benign: 1, consequential: 2, prohibited: 3 };
+  return order[b] > order[a] ? b : a;
+}
+
 // Action types that are benign by default
 const BENIGN_DEFAULTS = new Set([
   "navigate",
@@ -81,7 +102,45 @@ export class SecurityKernelImpl implements SecurityKernel {
   }
 
   classify(request: CapabilityRequest): PolicyClass {
-    const { actionType } = request;
+    return this.classifyDetailed(request).policyClass;
+  }
+
+  /**
+   * Classification plus the evidence trail. `classify` is the thin wrapper, so
+   * there is exactly one classification path — a caller cannot get a gate
+   * decision that skipped the effect analysis.
+   */
+  classifyDetailed(request: CapabilityRequest): EffectVerdict {
+    const verbClass = this.classifyVerb(request.actionType);
+
+    // A verb with no target (navigate, wait_for) has no element to probe; the
+    // verb class is the whole story. Everything that touches an element goes
+    // through the effect classifier, INCLUDING when `effect` is missing —
+    // that is the "unknown" case, and it must not resolve to benign.
+    if (!TARGETED_VERBS.has(request.actionType.toLowerCase())) {
+      return {
+        policyClass: verbClass,
+        reasons: [`untargeted verb (${request.actionType})`],
+        lexiconVersion: EFFECT_LEXICON_VERSION,
+      };
+    }
+
+    const verdict = classifyEffect(
+      verbClass,
+      request.effect,
+      request.origin,
+      undefined,
+      request.actionType.toLowerCase(),
+    );
+    // Defence in depth: the effect classifier is documented raise-only, and
+    // this re-asserts it at the boundary. If it ever returned something lower
+    // than the verb class, the verb class wins.
+    return verdict.policyClass === raiseClass(verbClass, verdict.policyClass)
+      ? verdict
+      : { ...verdict, policyClass: verbClass, reasons: [...verdict.reasons, "effect verdict below verb class — verb class kept"] };
+  }
+
+  private classifyVerb(actionType: string): PolicyClass {
     const lower = actionType.toLowerCase();
 
     // Check prohibited first (highest priority)
