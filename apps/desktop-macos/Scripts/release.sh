@@ -93,8 +93,9 @@ else
   [ -n "$IDENT" ] || { echo "ERROR: no Developer ID identity for DMG signing." >&2; exit 1; }
   codesign --force --sign "$IDENT" --timestamp "$DIST_DMG"
   if [ -n "${NOTARY_KEY_ID:-}" ] && [ -n "${NOTARY_ISSUER:-}" ] && [ -n "${NOTARY_KEY_OP_ITEM:-}" ]; then
-    NOTARY_KEY_FILE="$(mktemp -t lattice-notary).p8"
-    trap 'rm -f "$NOTARY_KEY_FILE"' EXIT
+    NOTARY_KEY_DIR="$(mktemp -d -t lattice-notary)"
+    trap 'rm -rf "$NOTARY_KEY_DIR"' EXIT
+    NOTARY_KEY_FILE="$NOTARY_KEY_DIR/AuthKey_$NOTARY_KEY_ID.p8"
     op document get "$NOTARY_KEY_OP_ITEM" --vault "${NOTARY_KEY_OP_VAULT:-AI Agent}" \
       --out-file "$NOTARY_KEY_FILE" --force >/dev/null
     chmod 600 "$NOTARY_KEY_FILE"
