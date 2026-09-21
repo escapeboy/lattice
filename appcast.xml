@@ -6,6 +6,15 @@
     <description>Auto-update feed for the Lattice macOS desktop app.</description>
     <language>en</language>
     <item>
+      <title>Version 0.2.12</title>
+      <sparkle:version>14</sparkle:version>
+      <sparkle:shortVersionString>0.2.12</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <description><![CDATA[<ul><li>See the GitHub release notes for desktop-macos-v0.2.12.</li></ul>]]></description>
+      <pubDate>Mon, 21 Sep 2026 13:43:55 +0000</pubDate>
+      <enclosure url="https://github.com/escapeboy/lattice/releases/download/desktop-macos-v0.2.12/Lattice-macOS-0.2.12.dmg" sparkle:edSignature="SUTluZ72bLjIOSnG9thaWcAU7NsqeiMDBq5aHIrdw58fok9mkQmifvLZlMGAWnSwtEdDfL8f0L3cYfYaP1JWBg==" length="39695053" type="application/octet-stream" />
+    </item>
+    <item>
       <title>Version 0.2.11</title>
       <sparkle:version>13</sparkle:version>
       <sparkle:shortVersionString>0.2.11</sparkle:shortVersionString>
