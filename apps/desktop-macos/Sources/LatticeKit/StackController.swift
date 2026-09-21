@@ -78,7 +78,8 @@ public final class StackController: ObservableObject {
             workingDirectory: dataDir,
             environment: backendEnvironment(dataDir: dataDir),
             healthURL: healthURL,
-            logFile: logFile)
+            logFile: logFile,
+            requiredPorts: [gatewayPort, controlPlanePort])
 
         let sup = Supervisor(config: config)
         sup.onState = { [weak self] s in
