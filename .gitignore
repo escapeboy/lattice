@@ -12,3 +12,5 @@ traces/
 smoke-findings.md
 # Local agent instructions (references private Svod memory) — keep out of the public repo.
 CLAUDE.md
+# Local agent memories (Serena) — same reason as CLAUDE.md: keep out of the public repo.
+.serena/
