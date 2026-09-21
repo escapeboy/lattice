@@ -23,6 +23,10 @@ public struct SupervisorConfig: Sendable {
     public var maxRestarts: Int
     /// Backend stdout/stderr is appended here.
     public var logFile: URL?
+    /// Ports the backend binds on the health URL's host. Checked before every
+    /// launch: if something else already listens there, the backend would die
+    /// with EADDRINUSE and `/health` would be answered by the other process.
+    public var requiredPorts: [Int]
 
     public init(
         backendBinary: URL,
@@ -30,7 +34,8 @@ public struct SupervisorConfig: Sendable {
         environment: [String: String],
         healthURL: URL,
         maxRestarts: Int = 5,
-        logFile: URL? = nil
+        logFile: URL? = nil,
+        requiredPorts: [Int] = []
     ) {
         self.backendBinary = backendBinary
         self.workingDirectory = workingDirectory
@@ -38,6 +43,7 @@ public struct SupervisorConfig: Sendable {
         self.healthURL = healthURL
         self.maxRestarts = maxRestarts
         self.logFile = logFile
+        self.requiredPorts = requiredPorts
     }
 }
 
@@ -84,6 +90,12 @@ public final class Supervisor: @unchecked Sendable {
     private func launchLocked() {
         guard !stopping else { return }
         setStateLocked(restarts == 0 ? .starting : .restarting(attempt: restarts))
+        let host = config.healthURL.host ?? "127.0.0.1"
+        for port in config.requiredPorts where PortProbe.isListening(host: host, port: port) {
+            let owner = PortProbe.listenerDescription(port: port).map { " by \($0)" } ?? ""
+            setStateLocked(.failed("port \(port) is already in use\(owner) — stop it, then restart Lattice"))
+            return
+        }
         do {
             let p = try ManagedProcess(
                 executable: config.backendBinary,
@@ -98,7 +110,7 @@ public final class Supervisor: @unchecked Sendable {
                     self?.queue.async { self?.handleExitLocked(status) }
                 })
             proc = p
-            pollHealthUntilReady()
+            pollHealthUntilReady(for: p)
         } catch {
             setStateLocked(.failed("launch failed: \(error.localizedDescription)"))
         }
@@ -129,13 +141,16 @@ public final class Supervisor: @unchecked Sendable {
         }
     }
 
-    private func pollHealthUntilReady() {
+    /// Only `p` being alive and still current may count as healthy: a 200 from
+    /// a stale poll, or from another process on the same port, must not reset
+    /// the restart budget — that turned a port clash into an endless loop.
+    private func pollHealthUntilReady(for p: ManagedProcess) {
         let url = config.healthURL
         Task.detached { [weak self] in
             for _ in 0..<120 {
                 if await Supervisor.isHealthy(url) {
                     self?.queue.async {
-                        guard let self, !self.stopping, self.proc != nil else { return }
+                        guard let self, !self.stopping, self.proc === p, p.isRunning else { return }
                         self.restarts = 0
                         self.setStateLocked(.running)
                     }
@@ -182,5 +197,49 @@ public final class Supervisor: @unchecked Sendable {
             usleep(100_000)
         }
         return false
+    }
+}
+
+/// Loopback port checks used before launching the backend.
+enum PortProbe {
+    /// True when something accepts TCP connections on host:port. Before launch
+    /// the backend isn't running, so any listener there belongs to someone else.
+    static func isListening(host: String, port: Int) -> Bool {
+        let fd = socket(AF_INET, SOCK_STREAM, 0)
+        guard fd >= 0 else { return false }
+        defer { close(fd) }
+        var addr = sockaddr_in()
+        addr.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+        addr.sin_family = sa_family_t(AF_INET)
+        addr.sin_port = in_port_t(UInt16(truncatingIfNeeded: port).bigEndian)
+        guard inet_pton(AF_INET, host == "localhost" ? "127.0.0.1" : host, &addr.sin_addr) == 1 else { return false }
+        let rc = withUnsafePointer(to: &addr) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+            }
+        }
+        return rc == 0
+    }
+
+    /// "node (PID 1516)" for the process listening on the port, via lsof.
+    /// Best-effort: nil when lsof is unavailable or finds nothing.
+    static func listenerDescription(port: Int) -> String? {
+        let task = Process()
+        task.executableURL = URL(fileURLWithPath: "/usr/sbin/lsof")
+        task.arguments = ["-nP", "-iTCP:\(port)", "-sTCP:LISTEN", "-Fpc"]
+        let out = Pipe()
+        task.standardOutput = out
+        task.standardError = FileHandle.nullDevice
+        do { try task.run() } catch { return nil }
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        task.waitUntilExit()
+        var pid: String?
+        var name: String?
+        for line in String(decoding: data, as: UTF8.self).split(separator: "\n") {
+            if line.hasPrefix("p"), pid == nil { pid = String(line.dropFirst()) }
+            if line.hasPrefix("c"), name == nil { name = String(line.dropFirst()) }
+        }
+        guard let pid else { return nil }
+        return "\(name ?? "process") (PID \(pid))"
     }
 }
