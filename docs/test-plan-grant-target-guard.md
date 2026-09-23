@@ -33,6 +33,8 @@
 ## Results (23.09.2026)
 
 - Pure + actuator: `target-guard.test.ts` 10, `governed-actuator.test.ts` 36 (7 new), all pass.
-- Live, agent-browser 0.31: all four variants refuse and delete nothing; the
-  still page executes and deletes Alpha. Before the fix, 3 of 4 variants deleted
-  Gamma under an approval for Alpha.
+- Live, agent-browser 0.31: all 8 shapes (rebuild/reuse × identical/unique
+  labels × name before/after the button) refuse and delete nothing; the still
+  page executes and deletes Alpha. Before the guard, 3 of the 4 name-before
+  shapes deleted Gamma; before `0e08c9b`, both name-after shapes did.
+- Workspace: build 0, lint 0, 706 passed / 23 skipped.

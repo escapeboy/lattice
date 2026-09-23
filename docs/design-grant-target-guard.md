@@ -23,8 +23,8 @@ approval log then records "approved" for an action the human did not approve.
 
 ## Narrowest fix
 
-Before the grant, record what the target is: role, name, state and the text that
-sits right before it on the page. After the grant, read it again from a fresh
+Before the grant, record what the target is: role, name, state and the page
+text on either side of it, up to the neighbouring controls. After the grant, read it again from a fresh
 snapshot. Same → click. Different → refuse with `element_gone` / `re-perceive`,
 naming what changed. Refused beats wrong, as in commit `27f5ef4`.
 
@@ -43,7 +43,8 @@ the human cannot tell rows apart from "Click 'Delete'" alone.
 
 ## Known cost
 
-Text right before the target is compared exactly. A live countdown or ticker
+Text around the target is compared exactly, up to the neighbouring controls,
+so a change at the start of the next row also refuses. A live countdown or ticker
 next to a consequential control will make every approval refuse. That fails
 closed and says why; it is recorded as a residual, not hidden.
 
@@ -55,5 +56,9 @@ only in the legacy CDP `ActionExecutor`. Nothing to tune on the path users run.
 
 ## Found on the way
 
-`parseSnapshotTree` lost the ref and state of every node with a second attribute
-(`[checked=true, ref=e1]`). Fixed separately in `9374de0`.
+- `parseSnapshotTree` lost the ref and state of every node with a second
+  attribute (`[checked=true, ref=e1]`). Fixed in `9374de0`.
+- That fix, and the name pattern on main, let page text pick a node's ref: a
+  value `hi [ref=e5]` or a label with escaped quotes. Fixed in `8f063bb`.
+- Two live tests in `build-on-session.test.ts` were red on main since `cd1f5bb`.
+  Fixed in `9539079`.

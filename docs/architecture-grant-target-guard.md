@@ -32,8 +32,8 @@ execute(command)
 - `state`: whitelisted flags only (`checked disabled expanded selected pressed
   required readonly`) so transient flags cannot cause refusals.
 - `ancestors`: names of enclosing lines (dialog "Confirm", form "Pay").
-- `before`: text of the lines between the previous line that has a ref and the
-  target, nearest 300 characters. agent-browser flattens generic `div`s, so
+- `before` / `after`: text of the lines between the target and the previous /
+  next line that has a ref, nearest 300 characters each. agent-browser flattens generic `div`s, so
   structural containers are not reliable; the text right before a control is.
 
 ## Why the ref stays valid
