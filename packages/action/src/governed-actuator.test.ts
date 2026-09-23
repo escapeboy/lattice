@@ -28,8 +28,15 @@ class FakeSession implements EngineSession {
   currentUrl(): Promise<string> {
     return Promise.resolve("https://app.example.com/");
   }
-  snapshot(): Promise<RawSnapshot> {
-    return Promise.resolve({ url: "https://app.example.com/", refs: [], tree: "" });
+  /** The full page tree; e1 matches the default target's perceived label. */
+  tree = '- link "Open help" [ref=e1]';
+  /** Trees served before `tree`, one per full snapshot: a page changing under a wait. */
+  treeQueue: string[] = [];
+  fullSnapshots = 0;
+  snapshot(opts?: { interactive?: boolean }): Promise<RawSnapshot> {
+    if (opts?.interactive === false) this.fullSnapshots++;
+    const tree = this.treeQueue.shift() ?? this.tree;
+    return Promise.resolve({ url: "https://app.example.com/", refs: [], tree });
   }
   readText(): Promise<string> {
     return Promise.resolve("page text");
@@ -178,6 +185,7 @@ describe("GovernedActuator — kernel gating over the semantic engine", () => {
       },
     });
     PERCEIVED["danger-1"] = { role: "link", label: "Delete this project", href: "https://app.example.com/x" };
+    session.tree = '- link "Delete this project" [ref=e1]';
     const res = await actuator(granting).execute({ type: "act", target: target("danger-1") });
     expect(res.policyClass).toBe("consequential");
     expect(seen).toHaveLength(1);
@@ -450,5 +458,117 @@ describe("GovernedActuator — network backstop wiring", () => {
     const res = await actuator.execute({ type: "act", target: target() });
     expect(res.backstop).toBe("disabled");
     expect(backstop.calls).toEqual([]);
+  });
+});
+
+describe("GovernedActuator — the approved target is the clicked target", () => {
+  // Verbatim agent-browser shape: three rows, identical "Delete" buttons.
+  const rows = (names: string[]): string =>
+    names
+      .map((n, i) => `- listitem [level=1]\n  - StaticText "${n}"\n  - button "Delete" [ref=e${i + 1}]`)
+      .join("\n");
+
+  const perceivedDelete: ReAnchor = {
+    refFor: () => "e1",
+    nodeFor: () => ({ role: "button", label: "Delete" }),
+  };
+
+  function approving(onGrant?: (req: { detail?: { action: string } }) => void): SecurityKernel {
+    return createSecurityKernel({
+      allowedOrigins: ["https://app.example.com"],
+      egressAllowlist: [],
+      prohibitedActions: [],
+      grantHandler: (req): Promise<GrantDecision> => {
+        onGrant?.(req);
+        return Promise.resolve({ granted: true, grantId: "g1" });
+      },
+    });
+  }
+
+  function describer(): { describe: (c: ActionCommand, t: string, context?: string) => { action: string } } {
+    return { describe: (_c, _t, context) => ({ action: `Click 'Delete'${context ? ` — next to: ${context}` : ""}` }) };
+  }
+
+  it("clicks when the page did not change during the wait", async () => {
+    const session = new FakeSession();
+    session.tree = rows(["Alpha", "Beta", "Gamma"]);
+    const res = await new GovernedActuator(session, approving(), perceivedDelete, ctx).execute({
+      type: "act",
+      target: target("delete-1"),
+    });
+    expect(res.gated).toBe(true);
+    expect(session.acts).toEqual([{ type: "click", target: { kind: "ref", ref: "e1" } }]);
+  });
+
+  it("refuses, and clicks nothing, when the row under the ref changed during the wait", async () => {
+    const session = new FakeSession();
+    session.treeQueue = [rows(["Alpha", "Beta", "Gamma"])];
+    session.tree = rows(["Gamma", "Alpha", "Beta"]);
+    const run = new GovernedActuator(session, approving(), perceivedDelete, ctx).execute({
+      type: "act",
+      target: target("delete-1"),
+    });
+    await expect(run).rejects.toMatchObject({ code: "element_gone" });
+    await expect(run).rejects.toThrow(/text before it/);
+    expect(session.acts).toHaveLength(0);
+  });
+
+  it("refuses when the control's state changed during the wait", async () => {
+    const session = new FakeSession();
+    session.treeQueue = ['- button "Delete" [ref=e1]'];
+    session.tree = '- button "Delete" [disabled, ref=e1]';
+    const run = new GovernedActuator(session, approving(), perceivedDelete, ctx).execute({
+      type: "act",
+      target: target("delete-1"),
+    });
+    await expect(run).rejects.toThrow(/\(state\)/);
+    expect(session.acts).toHaveLength(0);
+  });
+
+  it("refuses when the ref is gone after the wait", async () => {
+    const session = new FakeSession();
+    session.treeQueue = ['- button "Delete" [ref=e1]'];
+    session.tree = '- button "Delete" [ref=e7]';
+    const run = new GovernedActuator(session, approving(), perceivedDelete, ctx).execute({
+      type: "act",
+      target: target("delete-1"),
+    });
+    await expect(run).rejects.toMatchObject({ code: "element_gone" });
+    expect(session.acts).toHaveLength(0);
+  });
+
+  it("does not ask the human when the label already differs from what the agent perceived", async () => {
+    const session = new FakeSession();
+    session.tree = '- button "Delete everything" [ref=e1]';
+    let asked = 0;
+    const run = new GovernedActuator(session, approving(() => asked++), perceivedDelete, ctx).execute({
+      type: "act",
+      target: target("delete-1"),
+    });
+    await expect(run).rejects.toMatchObject({ code: "element_gone" });
+    await expect(run).rejects.toThrow(/since it was perceived/);
+    expect(asked).toBe(0);
+    expect(session.acts).toHaveLength(0);
+  });
+
+  it("shows the human the text next to the control", async () => {
+    const session = new FakeSession();
+    session.tree = rows(["Alpha", "Beta", "Gamma"]);
+    let shown = "";
+    await new GovernedActuator(
+      session,
+      approving((req) => (shown = req.detail?.action ?? "")),
+      perceivedDelete,
+      ctx,
+      describer(),
+    ).execute({ type: "act", target: target("delete-1") });
+    expect(shown).toBe("Click 'Delete' — next to: Alpha");
+  });
+
+  it("takes no full snapshot for an auto-granted action", async () => {
+    const session = new FakeSession();
+    await new GovernedActuator(session, approving(), anchor, ctx).execute({ type: "act", target: target() });
+    expect(session.acts).toHaveLength(1);
+    expect(session.fullSnapshots).toBe(0);
   });
 });

@@ -32,12 +32,13 @@ import type {
 /** Field labels whose value must never appear in the operator preview. */
 const SECRET_LABEL = /pass|secret|cvv|card|otp|\bpin\b|token|ssn|security code/i;
 
-function humanAction(type: string, label: string | undefined, fieldCount: number): string {
+function humanAction(type: string, label: string | undefined, fieldCount: number, context?: string): string {
+  const near = context ? ` — next to: ${context}` : "";
   if (type === "submit") {
-    return fieldCount > 0 ? `Submit form (${fieldCount} field${fieldCount === 1 ? "" : "s"})` : "Submit form";
+    return (fieldCount > 0 ? `Submit form (${fieldCount} field${fieldCount === 1 ? "" : "s"})` : "Submit form") + near;
   }
-  if (type === "act") return label ? `Click '${label}'` : "Click control";
-  return label ? `${type} '${label}'` : type;
+  if (type === "act") return (label ? `Click '${label}'` : "Click control") + near;
+  return (label ? `${type} '${label}'` : type) + near;
 }
 
 export interface BuildOnSessionContext {
@@ -87,7 +88,7 @@ export class BuildOnSession {
     // Perception-aware enrichment for the approval panel: the actuator has no
     // labels/filled-field context; this session does.
     const describer: ActionDescriber = {
-      describe: (command, effectiveType) => this.describeAction(command, effectiveType),
+      describe: (command, effectiveType, context) => this.describeAction(command, effectiveType, context),
     };
     this.actuator = new GovernedActuator(engine, kernel, anchor, ctx, describer);
   }
@@ -98,7 +99,7 @@ export class BuildOnSession {
   }
 
   /** Build operator-facing detail for a consequential command (best-effort). */
-  private describeAction(command: ActionCommand, effectiveType: string): ActionDetail | undefined {
+  private describeAction(command: ActionCommand, effectiveType: string, context?: string): ActionDetail | undefined {
     const targetLabel = "target" in command ? this.labelFor(command.target.nodeId) : undefined;
     const intent = "intent" in command ? command.intent : undefined;
     const fields = effectiveType === "submit" && this.filled.length ? this.filled.map((f) => ({ ...f })) : undefined;
@@ -106,7 +107,7 @@ export class BuildOnSession {
     // origin is what the operator is actually approving against.
     const origin = this.liveOrigin();
     return {
-      action: humanAction(effectiveType, targetLabel, this.filled.length),
+      action: humanAction(effectiveType, targetLabel, this.filled.length, context),
       ...(origin ? { origin } : {}),
       ...(targetLabel ? { targetLabel } : {}),
       ...(fields ? { fields } : {}),

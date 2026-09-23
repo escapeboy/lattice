@@ -18,6 +18,7 @@ import type { ActionDetail, EffectEvidence, SecurityKernel } from "@lattice/kern
 import type { EngineSession, Locator, SemanticAction } from "@lattice/engine-adapter";
 import type { NodeId } from "@lattice/perception";
 import { collectEngineEvidence, type PerceivedNode } from "./engine-evidence.js";
+import { guardContext, guardDiff, targetGuard, type TargetGuard } from "./target-guard.js";
 import { ActionError } from "./types.js";
 import type { ActionCommand } from "./types.js";
 
@@ -27,7 +28,8 @@ import type { ActionCommand } from "./types.js";
  * actuator does not. Returns undefined when there is nothing useful to add.
  */
 export interface ActionDescriber {
-  describe(command: ActionCommand, effectiveType: string): ActionDetail | undefined;
+  /** `context` is page text next to the target, so the human can tell rows apart. */
+  describe(command: ActionCommand, effectiveType: string, context?: string): ActionDetail | undefined;
 }
 
 /** Re-anchoring source: maps a stable NodeId to the current snapshot's ref. */
@@ -190,22 +192,39 @@ export class GovernedActuator {
     const actionType =
       command.type === "act" && evidence?.submitControl === true ? "submit" : command.type;
 
-    const detail = this.describer?.describe(command, actionType);
-    const request = {
+    const base = {
       actionType,
       origin: this.ctx.origin,
       sessionId: this.ctx.sessionId,
       payload: command,
-      ...(detail ? { detail } : {}),
       ...(evidence ? { effect: evidence } : {}),
     };
     // Classify once so the result can tell the agent WHETHER this passed a human
     // grant. `consequential` → the grant was a human approval (gated); read/benign
     // → an auto-grant (not gated). Same request the gate classifies internally.
-    const policyClass = this.kernel.classify(request);
+    const policyClass = this.kernel.classify(base);
+    // A human grant is for the control the human was shown. Pin it now and
+    // check it again after the wait, which can outlast a re-render.
+    const pinned =
+      policyClass === "consequential" && "target" in command
+        ? await this.pinTarget(command.target.nodeId)
+        : undefined;
+    const detail = this.describer?.describe(command, actionType, pinned && guardContext(pinned));
+    const request = { ...base, ...(detail ? { detail } : {}) };
     const decision = await this.kernel.requestGrant(request);
     if (!decision.granted) {
       throw new ActionError("prohibited", "human-grant-required", decision.reason ?? "blocked by policy");
+    }
+    if (pinned && "target" in command) {
+      const now = await this.guardFor(command.target.nodeId);
+      const changed = guardDiff(pinned, now);
+      if (changed.length > 0) {
+        throw new ActionError(
+          "element_gone",
+          "re-perceive",
+          `target changed while waiting for approval (${changed.join(", ")}); the approved action was not performed`,
+        );
+      }
     }
     // Additive governance metadata: a human-approved consequential action carries
     // gated:true + the opaque grantId + policyClass, so it is distinguishable from
@@ -268,6 +287,32 @@ export class GovernedActuator {
     if (!("target" in command)) return undefined;
     const nodeId = command.target.nodeId;
     return collectEngineEvidence(this.engine, this.anchor.refFor(nodeId), this.anchor.nodeFor?.(nodeId));
+  }
+
+  /**
+   * The guard the human approves against. It must describe the control the
+   * agent perceived: if the label moved on since then, the approval panel would
+   * name one control while the click hits another.
+   */
+  private async pinTarget(nodeId: NodeId): Promise<TargetGuard> {
+    const guard = await this.guardFor(nodeId);
+    const perceived = this.anchor.nodeFor?.(nodeId)?.label;
+    if (perceived !== undefined && perceived !== guard.name) {
+      throw new ActionError(
+        "element_gone",
+        "re-perceive",
+        `target changed since it was perceived ('${perceived}' is now '${guard.name}')`,
+      );
+    }
+    return guard;
+  }
+
+  private async guardFor(nodeId: NodeId): Promise<TargetGuard> {
+    const ref = this.anchor.refFor(nodeId);
+    const raw = ref ? await this.engine.snapshot({ interactive: false }) : undefined;
+    const guard = ref && raw ? targetGuard(raw.tree, ref) : undefined;
+    if (!guard) throw new ActionError("element_gone", "re-perceive", `no live ref for node ${nodeId}`);
+    return guard;
   }
 
   /** Resolve a command's target NodeId to the engine's current ref, or fail typed. */
