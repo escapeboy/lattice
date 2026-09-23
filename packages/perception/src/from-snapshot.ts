@@ -127,7 +127,8 @@ export function parseSnapshotTree(tree: string): ParsedLine[] {
         if (key === "ref") {
           if (value && /^e\d+$/.test(value)) ref = value;
         } else if (/^[a-z]+$/.test(key) && value !== "false") {
-          flags.add(key);
+          // `checked=mixed` is not `checked`: keep any value other than true.
+          flags.add(value === undefined || value === "true" ? key : `${key}=${value}`);
         }
       }
     }

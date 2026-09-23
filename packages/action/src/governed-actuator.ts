@@ -309,8 +309,7 @@ export class GovernedActuator {
 
   private async guardFor(nodeId: NodeId): Promise<TargetGuard> {
     const ref = this.anchor.refFor(nodeId);
-    const raw = ref ? await this.engine.snapshot({ interactive: false }) : undefined;
-    const guard = ref && raw ? targetGuard(raw.tree, ref) : undefined;
+    const guard = ref && targetGuard((await this.engine.snapshot({ interactive: false })).tree, ref);
     if (!guard) throw new ActionError("element_gone", "re-perceive", `no live ref for node ${nodeId}`);
     return guard;
   }

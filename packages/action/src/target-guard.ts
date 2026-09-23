@@ -19,9 +19,9 @@ export interface TargetGuard {
   readonly state: readonly string[];
   /** Names of enclosing nodes (dialog "Confirm", form "Pay"), nearest first. */
   readonly ancestors: readonly string[];
-  /** Page text between the previous ref'd node and the target, nearest 300 chars. */
+  /** Page text from the previous ref'd node (its name included) to the target, nearest 300 chars. */
   readonly before: string;
-  /** Page text between the target and the next ref'd node, nearest 300 chars. */
+  /** Page text from the target to the next ref'd node (its name included), nearest 300 chars. */
   readonly after: string;
 }
 
@@ -59,23 +59,27 @@ export function targetGuard(tree: string, ref: string): TargetGuard | undefined 
   // the tree at all. The text on either side of the control survives
   // flattening, and it is what tells one row's "Delete" from the next. Both
   // sides, because a row can name itself before its button or after it.
+  // The neighbouring control's own name is kept: a row is often named BY a
+  // control (`link "Alpha" [ref=e4]`, `heading "Gamma" [ref=e1]`), and stopping
+  // short of it left nothing to tell the rows apart (observed live, 0.31).
   const before: string[] = [];
   for (let i = at - 1; i >= 0; i--) {
     const line = lines[i]!;
-    if (line.ref !== undefined) break;
     if (line.name.trim()) before.unshift(line.name.trim());
+    if (line.ref !== undefined) break;
   }
   const after: string[] = [];
   for (let i = at + 1; i < lines.length; i++) {
     const line = lines[i]!;
-    if (line.ref !== undefined) break;
     if (line.name.trim()) after.push(line.name.trim());
+    if (line.ref !== undefined) break;
   }
 
   return {
     role: target.rawRole,
     name: target.name,
-    state: [...target.flags].filter((f) => STATE_FLAGS.has(f)).sort(),
+    // `checked=mixed` is kept whole: mixed and checked click differently.
+    state: [...target.flags].filter((f) => STATE_FLAGS.has(f.split("=")[0]!)).sort(),
     ancestors,
     before: before.join(" ").slice(-TEXT_CHARS),
     after: after.join(" ").slice(0, TEXT_CHARS),
@@ -94,14 +98,20 @@ export function guardDiff(a: TargetGuard, b: TargetGuard): string[] {
   return changed;
 }
 
-/** Short page text for the approval panel, so the human can tell rows apart. */
+const CONTEXT_WORDS = 6;
+const CONTEXT_CHARS = 40;
+
+/**
+ * Short page text for the approval panel, so the human can tell rows apart:
+ * `Alpha [here] Beta`. Both sides, with the control's place marked, because
+ * one side alone names the neighbouring row whenever the row's name sits on
+ * the other side of its button.
+ */
 export function guardContext(g: TargetGuard): string | undefined {
   // A list bullet or a separator says nothing about which row this is.
-  const words = (text: string): string =>
-    text
-      .split(/\s+/)
-      .filter((w) => /[\p{L}\p{N}]/u.test(w))
-      .join(" ");
-  const near = words(g.before.slice(-80)) || words(g.after.slice(0, 80));
-  return near ? near : undefined;
+  const words = (text: string): string[] => text.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w));
+  const before = words(g.before).slice(-CONTEXT_WORDS).join(" ").slice(-CONTEXT_CHARS);
+  const after = words(g.after).slice(0, CONTEXT_WORDS).join(" ").slice(0, CONTEXT_CHARS);
+  if (!before && !after) return undefined;
+  return [before, "[here]", after].filter(Boolean).join(" ");
 }

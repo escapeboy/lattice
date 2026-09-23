@@ -146,7 +146,8 @@ describe("BuildOnSession — governed composition (unit)", () => {
     await session.act({ type: "submit", target: { nodeId: byLabel("Log in") }, intent: "Log in as the test user" });
 
     expect(captured?.actionType).toBe("submit");
-    expect(captured?.detail?.action).toBe("Submit form (2 fields)");
+    // The neighbouring control's name is the only page text next to the button.
+    expect(captured?.detail?.action).toBe("Submit form (2 fields) — next to: [here] Email");
     // The live page origin is carried even though the session task scope is empty.
     expect(captured?.detail?.origin).toBe(ORIGIN);
     expect(captured?.detail?.targetLabel).toBe("Log in");

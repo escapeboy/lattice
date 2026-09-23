@@ -30,11 +30,19 @@ execute(command)
 
 - `role`, `name` of the ref's line.
 - `state`: whitelisted flags only (`checked disabled expanded selected pressed
-  required readonly`) so transient flags cannot cause refusals.
+  required readonly`) so transient flags cannot cause refusals. A value other
+  than `true` stays on the flag (`checked=mixed`), so mixed ≠ checked.
 - `ancestors`: names of enclosing lines (dialog "Confirm", form "Pay").
 - `before` / `after`: text of the lines between the target and the previous /
-  next line that has a ref, nearest 300 characters each. agent-browser flattens generic `div`s, so
-  structural containers are not reliable; the text right before a control is.
+  next line that has a ref, **including that line's name**, nearest 300
+  characters each. agent-browser flattens generic `div`s, so structural
+  containers are not reliable; the text right before a control is. A row is
+  often named by a control with its own ref (`link "Alpha" [ref=e4]`,
+  `heading "Gamma" [ref=e1]`), so stopping short of that line left nothing to
+  compare (observed live, 0.31).
+- Approval text: both sides, the control's place marked:
+  `Click 'Delete' — next to: Alpha [here] Beta`. One side alone named the
+  previous row whenever a row names itself after its button.
 
 ## Why the ref stays valid
 

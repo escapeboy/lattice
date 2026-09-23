@@ -562,7 +562,7 @@ describe("GovernedActuator — the approved target is the clicked target", () =>
       ctx,
       describer(),
     ).execute({ type: "act", target: target("delete-1") });
-    expect(shown).toBe("Click 'Delete' — next to: Alpha");
+    expect(shown).toBe("Click 'Delete' — next to: Alpha [here] Beta Delete");
   });
 
   it("takes no full snapshot for an auto-granted action", async () => {

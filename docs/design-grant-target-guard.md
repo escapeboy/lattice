@@ -28,8 +28,9 @@ text on either side of it, up to the neighbouring controls. After the grant, rea
 snapshot. Same → click. Different → refuse with `element_gone` / `re-perceive`,
 naming what changed. Refused beats wrong, as in commit `27f5ef4`.
 
-Also show that text in the approval (`Click 'Delete' — next to: Alpha`), because
-the human cannot tell rows apart from "Click 'Delete'" alone.
+Also show that text in the approval (`Click 'Delete' — next to: Alpha [here] Beta`),
+because the human cannot tell rows apart from "Click 'Delete'" alone. Both sides
+are shown, because a row can name itself on either side of its button.
 
 ## Out of scope
 
@@ -44,8 +45,9 @@ the human cannot tell rows apart from "Click 'Delete'" alone.
 ## Known cost
 
 Text around the target is compared exactly, up to the neighbouring controls,
-so a change at the start of the next row also refuses. A live countdown or ticker
-next to a consequential control will make every approval refuse. That fails
+so a change at the start of the next row also refuses. A live countdown, a ticker
+or a relative timestamp ("2 minutes ago") next to a consequential control will
+make approvals refuse once the wait is long enough for it to change. That fails
 closed and says why; it is recorded as a residual, not hidden.
 
 ## Dropped: post-action wait (research §2.2)

@@ -41,25 +41,58 @@ describe("targetGuard", () => {
       state: [],
       ancestors: [],
       before: "• Alpha",
-      after: "• Beta",
+      after: "• Beta Delete",
     });
-    expect(targetGuard(LIST, "e3")?.before).toBe("• Beta");
+    expect(targetGuard(LIST, "e3")?.before).toBe("Delete • Beta");
   });
 
   it("names enclosing nodes as ancestors, nearest first", () => {
     expect(targetGuard(LIST, "e1")?.ancestors).toEqual(["Pay"]);
     expect(targetGuard(DIVS, "e5")?.ancestors).toEqual(["Confirm"]);
-    expect(targetGuard(DIVS, "e5")?.before).toBe("Confirm Delete project Alpha?");
+    expect(targetGuard(DIVS, "e5")?.before).toBe("Delete Confirm Delete project Alpha?");
   });
 
   it("tells flattened div rows apart by the text before the control", () => {
     expect(targetGuard(DIVS, "e3")?.before).toBe("Alpha");
-    expect(targetGuard(DIVS, "e4")?.before).toBe("Betaowner x");
+    expect(targetGuard(DIVS, "e4")?.before).toBe("Delete Betaowner x");
+  });
+
+  // Verbatim agent-browser 0.31: a row named by a link, and a heading, both
+  // carry their own ref. The guard must still see the row's name.
+  const NAMED_BY_CONTROL = (a: string, b: string): string =>
+    [
+      "- list",
+      "  - listitem [level=1]",
+      '    - ListMarker "• "',
+      `    - link "${a}" [ref=e4]`,
+      '    - button "Delete" [ref=e5]',
+      "  - listitem [level=1]",
+      '    - ListMarker "• "',
+      `    - link "${b}" [ref=e6]`,
+      '    - button "Delete" [ref=e7]',
+      `- heading "${a}" [level=3, ref=e1]`,
+      '- button "Delete" [ref=e2]',
+    ].join("\n");
+
+  it("keeps the name of a neighbouring control that names the row", () => {
+    expect(targetGuard(NAMED_BY_CONTROL("Alpha", "Beta"), "e5")?.before).toBe("Alpha");
+    expect(targetGuard(NAMED_BY_CONTROL("Alpha", "Beta"), "e2")?.before).toBe("Alpha");
+    const before = targetGuard(NAMED_BY_CONTROL("Alpha", "Beta"), "e5")!;
+    const swapped = targetGuard(NAMED_BY_CONTROL("Gamma", "Alpha"), "e5")!;
+    expect(guardDiff(before, swapped)).toEqual(["text before it", "text after it"]);
   });
 
   it("keeps whitelisted state only", () => {
     expect(targetGuard(DIVS, "e2")?.state).toEqual(["checked"]);
     expect(targetGuard('- button "X" [level=2, focused, disabled, ref=e1]', "e1")?.state).toEqual(["disabled"]);
+  });
+
+  it("tells a mixed checkbox from a checked one", () => {
+    // Verbatim agent-browser 0.31 for an indeterminate checkbox.
+    const mixed = targetGuard('- checkbox "all" [checked=mixed, ref=e3]', "e3")!;
+    const checked = targetGuard('- checkbox "all" [checked=true, ref=e3]', "e3")!;
+    expect(mixed.state).toEqual(["checked=mixed"]);
+    expect(guardDiff(mixed, checked)).toEqual(["state"]);
   });
 
   it("keeps the nearest 300 characters of text", () => {
@@ -111,10 +144,16 @@ describe("guardDiff", () => {
 });
 
 describe("guardContext", () => {
-  it("gives the panel the nearest text, or nothing", () => {
-    expect(guardContext(targetGuard(DIVS, "e3")!)).toBe("Alpha");
+  it("gives the panel the text on both sides of the control, or nothing", () => {
+    expect(guardContext(targetGuard(DIVS, "e3")!)).toBe("Alpha [here] Betaowner x Delete");
     expect(guardContext(targetGuard('- button "Go" [ref=e1]', "e1")!)).toBeUndefined();
     // Only a bullet before the button: the row's name comes after it.
-    expect(guardContext(targetGuard(LABEL_AFTER("Alpha", "Beta"), "e1")!)).toBe("Alpha");
+    expect(guardContext(targetGuard(LABEL_AFTER("Alpha", "Beta"), "e1")!)).toBe("[here] Alpha Delete");
+  });
+
+  it("does not name only the previous row when the row names itself after the button", () => {
+    // Beta's Delete: the text before it is Alpha's row. One side alone would
+    // show the human "Alpha" for a click on Beta.
+    expect(guardContext(targetGuard(LABEL_AFTER("Alpha", "Beta"), "e2")!)).toBe("Delete Alpha [here] Beta");
   });
 });

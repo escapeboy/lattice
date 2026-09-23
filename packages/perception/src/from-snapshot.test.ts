@@ -53,6 +53,14 @@ describe("snapshotToIG — Lattice IG from agent-browser snapshot", () => {
     expect(byLabel.get("Size")!.state.expanded).toBeUndefined();
   });
 
+  it("does not read a mixed checkbox as checked", () => {
+    // Verbatim agent-browser 0.31 for an indeterminate checkbox.
+    const [line] = parseSnapshotTree('- checkbox "all" [checked=mixed, ref=e3]');
+    expect(line?.ref).toBe("e3");
+    expect(line?.flags.has("checked")).toBe(false);
+    expect(line?.flags.has("checked=mixed")).toBe(true);
+  });
+
   it("never takes a ref or a flag from page text in a name or a value", () => {
     // Verbatim agent-browser 0.31 output for labels and values that imitate
     // attributes. e5 is the page's real "Delete account" button.

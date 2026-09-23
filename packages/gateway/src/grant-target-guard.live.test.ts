@@ -18,28 +18,29 @@ import { AgentBrowserEngine } from "@lattice/engine-adapter";
 const live = process.env["LATTICE_LIVE_ENGINE"] === "1" ? describe : describe.skip;
 
 /** Rows re-render `afterMs` after load; a click reports the row it landed in. */
-function page(mode: "rebuild" | "reuse", unique: boolean, afterMs: number, nameAfter = false): string {
+function page(mode: "rebuild" | "reuse", unique: boolean, afterMs: number, nameAfter = false, link = false): string {
   const html = `<!doctype html><title>rows</title>
 <ul id=list></ul><p id=out>none</p>
 <script>
 const list = document.getElementById('list');
+const label = (name) => ${link} ? '<a href="#">' + name + '</a>' : '<span>' + name + '</span>';
 const btn = (name) => '<button' + (${unique} ? ' aria-label="Delete ' + name + '"' : '') + '>Delete</button>';
 const render = (names) => {
   list.innerHTML = names
-    .map((n) => '<li>' + (${nameAfter} ? btn(n) + ' <span>' + n + '</span>' : '<span>' + n + '</span> ' + btn(n)) + '</li>')
+    .map((n) => '<li>' + (${nameAfter} ? btn(n) + ' ' + label(n) : label(n) + ' ' + btn(n)) + '</li>')
     .join('');
 };
 render(['Alpha', 'Beta', 'Gamma']);
 document.addEventListener('click', (e) => {
   const li = e.target.closest('li');
-  if (li) document.getElementById('out').textContent = 'deleted:' + li.querySelector('span').textContent;
+  if (li && e.target.closest('button')) document.getElementById('out').textContent = 'deleted:' + li.querySelector('span,a').textContent;
 });
 setTimeout(() => {
   if (${mode === "rebuild"}) { render(['Gamma', 'Alpha', 'Beta']); return; }
   // Same DOM nodes, new content: what a virtualised list does on scroll.
   const next = ['Gamma', 'Alpha', 'Beta'];
   list.querySelectorAll('li').forEach((li, i) => {
-    li.querySelector('span').textContent = next[i];
+    li.querySelector('span,a').textContent = next[i];
     if (${unique}) li.querySelector('button').setAttribute('aria-label', 'Delete ' + next[i]);
   });
 }, ${afterMs});
@@ -58,9 +59,12 @@ live("grant target guard (live)", () => {
     await engine.shutdown().catch(() => undefined);
   });
 
-  const cases: Array<["rebuild" | "reuse", boolean, boolean]> = [];
-  for (const mode of ["rebuild", "reuse"] as const)
-    for (const unique of [false, true]) for (const nameAfter of [false, true]) cases.push([mode, unique, nameAfter]);
+  const cases: Array<["rebuild" | "reuse", boolean, boolean, boolean]> = [];
+  for (const mode of ["rebuild", "reuse"] as const) {
+    for (const unique of [false, true]) for (const nameAfter of [false, true]) cases.push([mode, unique, nameAfter, false]);
+    // The row is named by a link, which carries its own ref.
+    cases.push([mode, false, false, true]);
+  }
 
   it("a page that stays still is not refused", async () => {
     const k = createSecurityKernel({
@@ -87,8 +91,8 @@ live("grant target guard (live)", () => {
     }
   }, 60_000);
 
-  for (const [mode, unique, nameAfter] of cases) {
-    const shape = `${mode}, ${unique ? "unique" : "identical"} labels, name ${nameAfter ? "after" : "before"} the button`;
+  for (const [mode, unique, nameAfter, link] of cases) {
+    const shape = `${mode}, ${unique ? "unique" : "identical"} labels, ${link ? "link" : "text"} name ${nameAfter ? "after" : "before"} the button`;
     it(`${shape}: refused, nothing deleted`, async () => {
       let approvals = 0;
       const k = createSecurityKernel({
@@ -103,9 +107,9 @@ live("grant target guard (live)", () => {
         },
       });
       const es = await engine.createSession();
-      const s = new BuildOnSession(es, k, { origin: "data:", sessionId: `guard-${mode}-${unique}-${nameAfter}` });
+      const s = new BuildOnSession(es, k, { origin: "data:", sessionId: `guard-${mode}-${unique}-${nameAfter}-${link}` });
       try {
-        await s.act({ type: "navigate", url: page(mode, unique, 1200, nameAfter) });
+        await s.act({ type: "navigate", url: page(mode, unique, 1200, nameAfter, link) });
         const ig = await s.perceive();
         const buttons = [...ig.graph.nodes.values()].filter((n) => n.role === "button");
         const alpha = unique ? buttons.find((n) => n.label === "Delete Alpha")! : buttons[0]!;
