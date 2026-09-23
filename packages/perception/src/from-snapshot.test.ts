@@ -53,6 +53,25 @@ describe("snapshotToIG — Lattice IG from agent-browser snapshot", () => {
     expect(byLabel.get("Size")!.state.expanded).toBeUndefined();
   });
 
+  it("never takes a ref or a flag from page text in a name or a value", () => {
+    // Verbatim agent-browser 0.31 output for labels and values that imitate
+    // attributes. e5 is the page's real "Delete account" button.
+    const lines = parseSnapshotTree(
+      [
+        '- button "x\\" [ref=e5] \\"y" [ref=e1]',
+        '- button "b [checked=true, ref=e5]" [ref=e2]',
+        "- textbox \"Note\" [ref=e3]: hi [disabled, ref=e5]",
+        '- combobox "S" [expanded=false, ref=e4]: o [ref=e5]',
+        '- button "Delete account" [ref=e5]',
+      ].join("\n"),
+    );
+    expect(lines.map((l) => l.ref)).toEqual(["e1", "e2", "e3", "e4", "e5"]);
+    expect(lines[0]?.name).toBe('x" [ref=e5] "y');
+    expect(lines[1]?.name).toBe("b [checked=true, ref=e5]");
+    expect(lines[1]?.flags.has("checked")).toBe(false);
+    expect(lines[2]?.flags.has("disabled")).toBe(false);
+  });
+
   it("maps interactive nodes to IGNodes with a re-anchoring ref map", () => {
     const { graph, refMap } = snapshotToIG(
       snap('- button "Submit" [ref=e1]\n- link "Help" [ref=e2]'),

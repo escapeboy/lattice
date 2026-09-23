@@ -129,7 +129,7 @@ export function render(s: AppState): SynthNode {
 
 const INTERACTIVE = new Set(["button", "link", "textbox", "combobox", "checkbox"]);
 
-/** agent-browser a11y text: indented `- role "name" [ref=eN]` lines + flags. */
+/** agent-browser a11y text: indented `- role "name" [attrs, ref=eN]: value` lines. */
 export function renderAx(root: SynthNode): { text: string; refs: Record<string, { name: string; role: string }> } {
   const lines: string[] = [];
   const refs: Record<string, { name: string; role: string }> = {};
@@ -138,10 +138,11 @@ export function renderAx(root: SynthNode): { text: string; refs: Record<string, 
     const ref = `e${++n}`;
     refs[ref] = { name: node.name, role: node.role };
     const indent = "  ".repeat(depth);
-    let flags = "";
-    if (node.checked === true) flags += " [checked]";
+    // agent-browser 0.31's shape: one attribute list, then the value, quotes escaped.
+    const attrs = node.checked === true ? `checked=true, ref=${ref}` : `ref=${ref}`;
     const val = node.value !== undefined ? `: ${node.value}` : "";
-    lines.push(`${indent}- ${node.role} "${node.name}"${val} [ref=${ref}]${flags}`);
+    const name = node.name.replace(/["\\]/g, "\\$&");
+    lines.push(`${indent}- ${node.role} "${name}" [${attrs}]${val}`);
     for (const c of node.children ?? []) walk(c, depth + 1);
   };
   walk(root, 0);

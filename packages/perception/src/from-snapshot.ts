@@ -97,7 +97,10 @@ interface ParsedLine {
   flags: Set<string>;
 }
 
-const LINE_RE = /^(\s*)-\s+([^\s"[]+)(?:\s+"([^"]*)")?(.*)$/;
+// The name is page text and agent-browser escapes quotes in it (`"x\" y"`), so it
+// is matched escape-aware; stopping at the first quote let a label spill into
+// the attribute list and choose its own ref.
+const LINE_RE = /^(\s*)-\s+([^\s"[]+)(?:\s+"((?:[^"\\]|\\.)*)")?(.*)$/;
 
 /** Parse agent-browser's indented tree text into structured lines. */
 export function parseSnapshotTree(tree: string): ParsedLine[] {
@@ -108,8 +111,10 @@ export function parseSnapshotTree(tree: string): ParsedLine[] {
     if (!m) continue;
     const indent = m[1] ?? "";
     const rawRole = (m[2] ?? "").toLowerCase();
-    const name = m[3] ?? "";
-    const rest = m[4] ?? "";
+    const name = (m[3] ?? "").replace(/\\(.)/g, "$1");
+    // Only the bracket groups right after the name are agent-browser's. What
+    // follows `: ` is the control's value, which the page writes.
+    const rest = /^\s*((?:\[[^\]]*\]\s*)*)/.exec(m[4] ?? "")?.[1] ?? "";
     // agent-browser writes one comma-separated attribute list per node:
     // `[checked=true, ref=e1]`, `[disabled, ref=e3]`. Matching `[ref=eN]` as a
     // whole bracket dropped the ref of every node that had any other attribute,
