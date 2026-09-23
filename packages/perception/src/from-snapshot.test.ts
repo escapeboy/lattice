@@ -29,6 +29,30 @@ describe("snapshotToIG — Lattice IG from agent-browser snapshot", () => {
     expect(lines[3]?.flags.has("required")).toBe(true);
   });
 
+  it("reads the ref and state from agent-browser's combined attribute list", () => {
+    // Verbatim agent-browser 0.31 output: one bracket, comma-separated.
+    const { graph, refMap } = snapshotToIG(
+      snap(
+        [
+          '- checkbox "Agree" [checked=true, ref=e1]',
+          '- checkbox "News" [checked=false, ref=e2]',
+          '- button "Off" [disabled, ref=e3]',
+          '- combobox "Size" [expanded=false, ref=e4]: S',
+          '  - option "S" [selected, ref=e6]',
+        ].join("\n"),
+      ),
+    );
+    const byLabel = new Map([...graph.nodes.values()].map((n) => [n.label, n]));
+    expect(refMap.get(byLabel.get("Agree")!.id)).toBe("e1");
+    expect(refMap.get(byLabel.get("News")!.id)).toBe("e2");
+    expect(refMap.get(byLabel.get("Off")!.id)).toBe("e3");
+    expect(refMap.get(byLabel.get("Size")!.id)).toBe("e4");
+    expect(byLabel.get("Agree")!.state.checked).toBe(true);
+    expect(byLabel.get("News")!.state.checked).toBeUndefined();
+    expect(byLabel.get("Off")!.state.disabled).toBe(true);
+    expect(byLabel.get("Size")!.state.expanded).toBeUndefined();
+  });
+
   it("maps interactive nodes to IGNodes with a re-anchoring ref map", () => {
     const { graph, refMap } = snapshotToIG(
       snap('- button "Submit" [ref=e1]\n- link "Help" [ref=e2]'),

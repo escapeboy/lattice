@@ -110,17 +110,27 @@ export function parseSnapshotTree(tree: string): ParsedLine[] {
     const rawRole = (m[2] ?? "").toLowerCase();
     const name = m[3] ?? "";
     const rest = m[4] ?? "";
-    const refMatch = /\[ref=(e\d+)\]/.exec(rest);
+    // agent-browser writes one comma-separated attribute list per node:
+    // `[checked=true, ref=e1]`, `[disabled, ref=e3]`. Matching `[ref=eN]` as a
+    // whole bracket dropped the ref of every node that had any other attribute,
+    // so checkboxes, selects and disabled buttons were unreachable.
+    let ref: string | undefined;
     const flags = new Set<string>();
-    for (const fm of rest.matchAll(/\[([a-z]+)\]/g)) {
-      const f = fm[1];
-      if (f && f !== "ref") flags.add(f);
+    for (const group of rest.matchAll(/\[([^\]]*)\]/g)) {
+      for (const attr of (group[1] ?? "").split(",")) {
+        const [key = "", value] = attr.trim().split("=", 2);
+        if (key === "ref") {
+          if (value && /^e\d+$/.test(value)) ref = value;
+        } else if (/^[a-z]+$/.test(key) && value !== "false") {
+          flags.add(key);
+        }
+      }
     }
     lines.push({
       depth: indent.length,
       rawRole,
       name,
-      ref: refMatch?.[1],
+      ref,
       flags,
     });
   }
