@@ -33,7 +33,8 @@ class FakeSession implements EngineSession {
     return Promise.resolve(`${ORIGIN}/`);
   }
   snapshot(): Promise<RawSnapshot> {
-    return Promise.resolve({ url: `${ORIGIN}/`, refs: [], tree: "" });
+    // Every node anchors to e1; a human grant re-reads it, so it must be the sign-in button.
+    return Promise.resolve({ url: `${ORIGIN}/`, refs: [], tree: '- button "Sign in" [ref=e1]' });
   }
   readText(): Promise<string> {
     return Promise.resolve("page text");

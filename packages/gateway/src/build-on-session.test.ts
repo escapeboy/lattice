@@ -146,7 +146,8 @@ describe("BuildOnSession — governed composition (unit)", () => {
     await session.act({ type: "submit", target: { nodeId: byLabel("Log in") }, intent: "Log in as the test user" });
 
     expect(captured?.actionType).toBe("submit");
-    expect(captured?.detail?.action).toBe("Submit form (2 fields)");
+    // The neighbouring control's name is the only page text next to the button.
+    expect(captured?.detail?.action).toBe("Submit form (2 fields) — next to: [here] Email");
     // The live page origin is carried even though the session task scope is empty.
     expect(captured?.detail?.origin).toBe(ORIGIN);
     expect(captured?.detail?.targetLabel).toBe("Log in");
@@ -173,7 +174,13 @@ live("BuildOnSession — governed end-to-end over real agent-browser (S4/S6)", (
     const es = await engine.createSession();
     // data: URLs are always in-scope; the agent never touches `es` directly —
     // only this governed session does.
-    const k = createSecurityKernel({ allowedOrigins: [], egressAllowlist: [], prohibitedActions: [] });
+    // A bare <button> in a form may submit it, so the click needs a human grant.
+    const k = createSecurityKernel({
+      allowedOrigins: [],
+      egressAllowlist: [],
+      prohibitedActions: [],
+      grantHandler: (): Promise<GrantDecision> => Promise.resolve({ granted: true, grantId: "live" }),
+    });
     session = new BuildOnSession(es, k, { origin: "data:", sessionId: "live" });
   }, 90_000);
 
@@ -196,9 +203,10 @@ live("BuildOnSession — governed end-to-end over real agent-browser (S4/S6)", (
     const buttonId = [...ig.graph.nodes.values()].find((n) => n.role === "button")!.id;
     const click = await session.act({ type: "act", target: { nodeId: buttonId } });
     expect(click.ok).toBe(true);
+    expect(click.gated).toBe(true);
   });
 
-  it("EFFECT-GATE (live): click on an EXPLICIT submit control is gated; a bare <button> default-submit is NOT (residual)", async () => {
+  it("EFFECT-GATE (live): a click on an explicit submit control and on a bare <button> are both gated", async () => {
     // Recording DENY handler: a gated click is blocked (no navigation) and we can
     // read WHICH actionType the kernel classified. Exercises the REAL `get attr`
     // probe against the agent-browser binary — validates the envelope parse too.
@@ -223,14 +231,13 @@ live("BuildOnSession — governed end-to-end over real agent-browser (S4/S6)", (
     await expect(s.act({ type: "act", target: { nodeId: submitId } })).rejects.toThrow();
     expect(calls).toEqual(["submit"]); // effect-gate fired: the click was classified as submit
 
-    // 2) Bare <button> (no type attr = DEFAULT submit): clicking it is benign
-    //    today — NO grant fires. This is the documented residual.
+    // 2) Bare <button> (no type attr = DEFAULT submit). The seam cannot see form
+    //    membership, so unknown → consequential: the old residual is closed.
     await s.act({ type: "navigate", url: "data:text/html,<form><input aria-label=Note><button>Save</button></form>" });
     const ig2 = await s.perceive();
     const bareId = [...ig2.graph.nodes.values()].find((n) => n.role === "button")!.id;
-    const res = await s.act({ type: "act", target: { nodeId: bareId } });
-    expect(res.ok).toBe(true); // executed with no gate
-    expect(calls).toEqual(["submit"]); // unchanged — the bare button did NOT trigger a grant
+    await expect(s.act({ type: "act", target: { nodeId: bareId } })).rejects.toThrow();
+    expect(calls).toEqual(["submit", "submit"]);
 
     await es.close().catch(() => undefined);
   }, 60_000);

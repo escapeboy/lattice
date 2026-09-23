@@ -97,7 +97,10 @@ interface ParsedLine {
   flags: Set<string>;
 }
 
-const LINE_RE = /^(\s*)-\s+([^\s"[]+)(?:\s+"([^"]*)")?(.*)$/;
+// The name is page text and agent-browser escapes quotes in it (`"x\" y"`), so it
+// is matched escape-aware; stopping at the first quote let a label spill into
+// the attribute list and choose its own ref.
+const LINE_RE = /^(\s*)-\s+([^\s"[]+)(?:\s+"((?:[^"\\]|\\.)*)")?(.*)$/;
 
 /** Parse agent-browser's indented tree text into structured lines. */
 export function parseSnapshotTree(tree: string): ParsedLine[] {
@@ -108,19 +111,32 @@ export function parseSnapshotTree(tree: string): ParsedLine[] {
     if (!m) continue;
     const indent = m[1] ?? "";
     const rawRole = (m[2] ?? "").toLowerCase();
-    const name = m[3] ?? "";
-    const rest = m[4] ?? "";
-    const refMatch = /\[ref=(e\d+)\]/.exec(rest);
+    const name = (m[3] ?? "").replace(/\\(.)/g, "$1");
+    // Only the bracket groups right after the name are agent-browser's. What
+    // follows `: ` is the control's value, which the page writes.
+    const rest = /^\s*((?:\[[^\]]*\]\s*)*)/.exec(m[4] ?? "")?.[1] ?? "";
+    // agent-browser writes one comma-separated attribute list per node:
+    // `[checked=true, ref=e1]`, `[disabled, ref=e3]`. Matching `[ref=eN]` as a
+    // whole bracket dropped the ref of every node that had any other attribute,
+    // so checkboxes, selects and disabled buttons were unreachable.
+    let ref: string | undefined;
     const flags = new Set<string>();
-    for (const fm of rest.matchAll(/\[([a-z]+)\]/g)) {
-      const f = fm[1];
-      if (f && f !== "ref") flags.add(f);
+    for (const group of rest.matchAll(/\[([^\]]*)\]/g)) {
+      for (const attr of (group[1] ?? "").split(",")) {
+        const [key = "", value] = attr.trim().split("=", 2);
+        if (key === "ref") {
+          if (value && /^e\d+$/.test(value)) ref = value;
+        } else if (/^[a-z]+$/.test(key) && value !== "false") {
+          // `checked=mixed` is not `checked`: keep any value other than true.
+          flags.add(value === undefined || value === "true" ? key : `${key}=${value}`);
+        }
+      }
     }
     lines.push({
       depth: indent.length,
       rawRole,
       name,
-      ref: refMatch?.[1],
+      ref,
       flags,
     });
   }
