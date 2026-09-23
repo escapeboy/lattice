@@ -41,6 +41,7 @@ describe("targetGuard", () => {
       state: [],
       ancestors: [],
       before: "• Alpha",
+      after: "• Beta",
     });
     expect(targetGuard(LIST, "e3")?.before).toBe("• Beta");
   });
@@ -73,7 +74,27 @@ describe("targetGuard", () => {
   });
 });
 
+// Verbatim agent-browser 0.31 output for <li><button>Delete</button> <span>Alpha</span></li>.
+const LABEL_AFTER = (a: string, b: string): string =>
+  [
+    "- list",
+    "  - listitem [level=1]",
+    '    - ListMarker "• "',
+    '    - button "Delete" [ref=e1]',
+    `    - StaticText "${a}"`,
+    "  - listitem [level=1]",
+    '    - ListMarker "• "',
+    '    - button "Delete" [ref=e2]',
+    `    - StaticText "${b}"`,
+  ].join("\n");
+
 describe("guardDiff", () => {
+  it("catches a row swap when the row names itself after the button", () => {
+    const before = targetGuard(LABEL_AFTER("Alpha", "Beta"), "e1")!;
+    const after = targetGuard(LABEL_AFTER("Gamma", "Alpha"), "e1")!;
+    expect(guardDiff(before, after)).toEqual(["text after it"]);
+  });
+
   it("is empty for the same control on an unchanged page", () => {
     expect(guardDiff(targetGuard(LIST, "e2")!, targetGuard(LIST, "e2")!)).toEqual([]);
   });
@@ -93,5 +114,7 @@ describe("guardContext", () => {
   it("gives the panel the nearest text, or nothing", () => {
     expect(guardContext(targetGuard(DIVS, "e3")!)).toBe("Alpha");
     expect(guardContext(targetGuard('- button "Go" [ref=e1]', "e1")!)).toBeUndefined();
+    // Only a bullet before the button: the row's name comes after it.
+    expect(guardContext(targetGuard(LABEL_AFTER("Alpha", "Beta"), "e1")!)).toBe("Alpha");
   });
 });

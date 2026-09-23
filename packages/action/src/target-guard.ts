@@ -21,6 +21,8 @@ export interface TargetGuard {
   readonly ancestors: readonly string[];
   /** Page text between the previous ref'd node and the target, nearest 300 chars. */
   readonly before: string;
+  /** Page text between the target and the next ref'd node, nearest 300 chars. */
+  readonly after: string;
 }
 
 // Flags that change what a click does. Anything else agent-browser adds later
@@ -35,7 +37,7 @@ const STATE_FLAGS: ReadonlySet<string> = new Set([
   "readonly",
 ]);
 
-const BEFORE_CHARS = 300;
+const TEXT_CHARS = 300;
 
 export function targetGuard(tree: string, ref: string): TargetGuard | undefined {
   const lines = parseSnapshotTree(tree);
@@ -54,13 +56,20 @@ export function targetGuard(tree: string, ref: string): TargetGuard | undefined 
   }
 
   // agent-browser flattens generic <div>s, so a row's container is often not in
-  // the tree at all. The text right before the control survives flattening, and
-  // it is what distinguishes one row's "Delete" from the next.
-  const text: string[] = [];
+  // the tree at all. The text on either side of the control survives
+  // flattening, and it is what tells one row's "Delete" from the next. Both
+  // sides, because a row can name itself before its button or after it.
+  const before: string[] = [];
   for (let i = at - 1; i >= 0; i--) {
     const line = lines[i]!;
     if (line.ref !== undefined) break;
-    if (line.name.trim()) text.unshift(line.name.trim());
+    if (line.name.trim()) before.unshift(line.name.trim());
+  }
+  const after: string[] = [];
+  for (let i = at + 1; i < lines.length; i++) {
+    const line = lines[i]!;
+    if (line.ref !== undefined) break;
+    if (line.name.trim()) after.push(line.name.trim());
   }
 
   return {
@@ -68,7 +77,8 @@ export function targetGuard(tree: string, ref: string): TargetGuard | undefined 
     name: target.name,
     state: [...target.flags].filter((f) => STATE_FLAGS.has(f)).sort(),
     ancestors,
-    before: text.join(" ").slice(-BEFORE_CHARS),
+    before: before.join(" ").slice(-TEXT_CHARS),
+    after: after.join(" ").slice(0, TEXT_CHARS),
   };
 }
 
@@ -80,11 +90,18 @@ export function guardDiff(a: TargetGuard, b: TargetGuard): string[] {
   if (a.state.join() !== b.state.join()) changed.push("state");
   if (a.ancestors.join("\u0000") !== b.ancestors.join("\u0000")) changed.push("ancestors");
   if (a.before !== b.before) changed.push("text before it");
+  if (a.after !== b.after) changed.push("text after it");
   return changed;
 }
 
 /** Short page text for the approval panel, so the human can tell rows apart. */
 export function guardContext(g: TargetGuard): string | undefined {
-  const near = g.before.slice(-80).trim();
+  // A list bullet or a separator says nothing about which row this is.
+  const words = (text: string): string =>
+    text
+      .split(/\s+/)
+      .filter((w) => /[\p{L}\p{N}]/u.test(w))
+      .join(" ");
+  const near = words(g.before.slice(-80)) || words(g.after.slice(0, 80));
   return near ? near : undefined;
 }
